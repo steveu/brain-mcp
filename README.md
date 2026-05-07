@@ -44,11 +44,13 @@ curl -s -X POST http://127.0.0.1:8765/mcp \
 
 ## Configuration
 
-| Env var            | Default                | Notes                                    |
-| ------------------ | ---------------------- | ---------------------------------------- |
-| `BRAIN_MCP_TOKEN`  | _(required)_           | Static bearer token. `openssl rand -hex 32`. |
-| `BRAIN_VAULT`      | `~/brain/vault`        | Absolute path to the vault directory.    |
-| `PORT`             | `8765`                 | Loopback bind, exposed via tunnel.       |
+| Env var                 | Default                          | Notes                                                                                              |
+| ----------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------- |
+| `BRAIN_MCP_TOKEN`       | _(required)_                     | Static bearer token. `openssl rand -hex 32`.                                                       |
+| `BRAIN_VAULT`           | `~/brain/vault`                  | Absolute path to the vault directory.                                                              |
+| `PORT`                  | `8765`                           | Loopback bind, exposed via tunnel.                                                                 |
+| `BRAIN_MCP_PUBLIC_URL`  | _(unset)_                        | Public HTTPS URL of the tunnel (no trailing slash). Set it to enable the OAuth + DCR endpoints used by Claude.ai's custom-connector flow. |
+| `BRAIN_MCP_OAUTH_STORE` | `~/data/brain-mcp/oauth.json`    | Where DCR client records persist.                                                                  |
 
 ## Exposing to Claude.ai
 
@@ -67,8 +69,13 @@ rotation and the Cloudflare Tunnel alternative.
   `write_file(path, content)` would turn this into a filesystem MCP and
   defeat the point. New tools should map to a vault concept the user names
   in conversation.
-- **Auth is a static bearer token** read from env. No OAuth, no per-user
-  state. Single-user service.
+- **Auth is a static bearer token** read from env, with an optional
+  OAuth + DCR shim layered on top so Claude.ai's custom-connector UI
+  can reach the same `/mcp` endpoint. The OAuth `/token` endpoint
+  hands back the same `BRAIN_MCP_TOKEN`; `/authorize` is gated by a
+  one-shot HTML form that asks for the token, since the public-facing
+  endpoints would otherwise let anyone reaching the tunnel mint a token.
+  Single-user service — no per-user state, no consent screen, no scopes.
 - **Path safety:** all vault writes go through `vaultPath(...)` which
   resolves and rejects anything outside `BRAIN_VAULT`.
 

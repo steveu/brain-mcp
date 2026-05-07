@@ -5,17 +5,12 @@ from a Claude.ai chat". Assumes the server is already running locally — see
 [README — Run locally](../README.md#run-locally) for that — and that the
 launchd job in [`ops/README.md`](../ops/README.md) is the supervisor.
 
-> **Status (2026-05-07).** Steps 1 and 2 (Funnel + public HTTPS) and the
-> launchd supervisor work today. **Step 3 (registering the connector in
-> Claude.ai) is blocked on adding OAuth to brain-mcp** — the consumer
-> Claude.ai custom-connector UI only accepts OAuth client ID/secret,
-> with no field for `Authorization: Bearer` headers. Tracked in
-> [#4](https://github.com/steveu/brain-mcp/issues/4); upstream limitation
-> in [anthropics/claude-ai-mcp#112](https://github.com/anthropics/claude-ai-mcp/issues/112).
->
-> Until then, bearer auth on `/mcp` still works fine from any client that
-> can send custom headers — Claude Code (via `headersHelper`), the Claude
-> API's `mcp_servers` connector field, or raw `curl`.
+> **Status (2026-05-07).** All three steps work today. brain-mcp now
+> serves OAuth metadata, DCR, and a token-gated `/authorize` page
+> alongside the bearer-protected `/mcp` endpoint, so the Claude.ai
+> custom-connector UI can register against it. Bearer auth on `/mcp`
+> is unchanged for clients that can send custom headers (Claude Code,
+> the Claude API's `mcp_servers` field, raw `curl`).
 
 The shape:
 
@@ -71,22 +66,43 @@ tailscale funnel --bg off
 
 ## 3. Register the connector in Claude.ai
 
-> Blocked on [#4](https://github.com/steveu/brain-mcp/issues/4) — see the
-> status note at the top of this doc. Steps below describe the intended
-> flow once OAuth is in place.
+Set `BRAIN_MCP_PUBLIC_URL` in `~/.config/brain-mcp/env` to the same
+hostname Funnel exposes (no trailing slash, scheme included), e.g.
+`https://mini.tail-xxxx.ts.net`. Restart the launchd job so the OAuth
+endpoints come up:
 
-1. Claude.ai → **Settings** → **Connectors** → **Add custom connector**.
-2. **Name:** `brain` (or whatever; it's only the label in the chat UI).
-3. **URL:** `https://<host>.<tailnet>.ts.net/mcp` — the same MagicDNS host
-   from step 2, with the `/mcp` path. The server's MCP transport is mounted
-   there; `/healthz` is unauthenticated and only for smoke-testing.
-4. **Auth:** OAuth client ID + client secret issued by brain-mcp's Dynamic
-   Client Registration endpoint (`/register`).
-5. Save. Claude.ai will call `tools/list` and should show `capture` and
-   `add_recipe` as available tools on the connector.
+```sh
+launchctl kickstart -k gui/$(id -u)/st.urm.brain-mcp
+```
 
-In the meantime, clients that accept custom headers can use the bearer
-token directly:
+Smoke-test the metadata endpoints:
+
+```sh
+curl -s https://mini.tail-xxxx.ts.net/.well-known/oauth-protected-resource
+curl -s https://mini.tail-xxxx.ts.net/.well-known/oauth-authorization-server
+```
+
+Both should return JSON. Then in Claude.ai:
+
+1. **Settings → Connectors → Add custom connector.**
+2. **Name:** `brain` (or whatever; it's only the chat-UI label).
+3. **URL:** `https://<host>.<tailnet>.ts.net/mcp`. Claude.ai discovers
+   the authorization server via `WWW-Authenticate` on the first 401 and
+   the protected-resource metadata document.
+4. **OAuth:** leave the **client ID** and **client secret** fields blank.
+   brain-mcp supports Dynamic Client Registration, so Claude.ai will
+   register itself at `/register` and persist the issued credentials.
+5. Save. Claude.ai opens a tab pointed at `/authorize`. Paste your
+   `BRAIN_MCP_TOKEN` into the form on that page and submit — the page
+   redirects back to Claude.ai with the auth code, which Claude.ai
+   exchanges at `/token`. The connector then calls `tools/list` and
+   `capture` and `add_recipe` show up as available tools.
+
+The DCR record persists at `~/data/brain-mcp/oauth.json`; deleting it
+forces Claude.ai to re-register on the next connector add.
+
+Clients that accept custom headers don't need any of this — they can
+keep using the bearer token directly:
 
 - **Claude Code** — point an MCP server at the same URL with a
   `headersHelper` that emits `Authorization: Bearer $BRAIN_MCP_TOKEN`.

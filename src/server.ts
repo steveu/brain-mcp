@@ -5,10 +5,15 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import { createOAuthRouter } from "./oauth.js";
 
 const VAULT = path.resolve(process.env.BRAIN_VAULT ?? path.join(homedir(), "brain", "vault"));
 const TOKEN = process.env.BRAIN_MCP_TOKEN;
 const PORT = Number(process.env.PORT ?? 8765);
+const PUBLIC_URL = process.env.BRAIN_MCP_PUBLIC_URL?.replace(/\/$/, "");
+const OAUTH_STORE =
+  process.env.BRAIN_MCP_OAUTH_STORE ??
+  path.join(homedir(), "data", "brain-mcp", "oauth.json");
 
 if (!TOKEN) {
   console.error("BRAIN_MCP_TOKEN is required");
@@ -105,6 +110,12 @@ app.use(express.json({ limit: "1mb" }));
 function requireBearer(req: Request, res: Response, next: NextFunction): void {
   const auth = req.headers.authorization;
   if (auth !== `Bearer ${TOKEN}`) {
+    if (PUBLIC_URL) {
+      res.setHeader(
+        "WWW-Authenticate",
+        `Bearer realm="brain-mcp", resource_metadata="${PUBLIC_URL}/.well-known/oauth-protected-resource"`,
+      );
+    }
     res.status(401).json({ error: "unauthorized" });
     return;
   }
@@ -114,6 +125,17 @@ function requireBearer(req: Request, res: Response, next: NextFunction): void {
 app.get("/healthz", (_req, res) => {
   res.json({ ok: true, vault: VAULT });
 });
+
+if (PUBLIC_URL) {
+  app.use(
+    createOAuthRouter({
+      publicUrl: PUBLIC_URL,
+      resourceUrl: `${PUBLIC_URL}/mcp`,
+      accessToken: TOKEN,
+      storePath: OAUTH_STORE,
+    }),
+  );
+}
 
 app.post("/mcp", requireBearer, async (req, res) => {
   const transport = new StreamableHTTPServerTransport({
@@ -127,5 +149,8 @@ app.post("/mcp", requireBearer, async (req, res) => {
 });
 
 app.listen(PORT, "127.0.0.1", () => {
-  console.log(`brain-mcp listening on http://127.0.0.1:${PORT} (vault: ${VAULT})`);
+  const oauthMode = PUBLIC_URL ? `oauth at ${PUBLIC_URL}` : "oauth disabled (no BRAIN_MCP_PUBLIC_URL)";
+  console.log(
+    `brain-mcp listening on http://127.0.0.1:${PORT} (vault: ${VAULT}, ${oauthMode})`,
+  );
 });
