@@ -1,0 +1,33 @@
+{
+  "name": "brain-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing personal Obsidian vault operations to Claude.ai.",
+  "type": "module",
+  "main": "dist/server.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/server.ts",
+    "start": "node dist/server.js",
+    "typecheck": "tsc --noEmit"
+  },
+  "license": "MIT",
+  "author": "Steve Urmston",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/steveu/brain-mcp.git"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.18.0",
+    "express": "^5.0.0",
+    "zod": "^3.23.0"
+  },
+  "devDependencies": {
+    "@types/express": "^5.0.0",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}
