@@ -1,0 +1,36 @@
+#!/bin/bash
+# Launcher for brain-mcp under launchd.
+# Sources ~/.config/brain-mcp/env, then execs the Node server with absolute paths.
+# Driven by ~/Library/LaunchAgents/st.urm.brain-mcp.plist.
+
+set -euo pipefail
+
+ENV_FILE="$HOME/.config/brain-mcp/env"
+SERVER="/Users/steveu/code/brain-mcp/dist/server.js"
+LOG="$HOME/Library/Logs/brain-mcp.log"
+
+exec >> "$LOG" 2>&1
+ts() { date "+%Y-%m-%dT%H:%M:%S%z"; }
+echo "=== $(ts) brain-mcp-launcher starting ==="
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "env file not found at $ENV_FILE — create it with BRAIN_MCP_TOKEN=..."
+  exit 1
+fi
+
+# shellcheck disable=SC1090
+set -a
+source "$ENV_FILE"
+set +a
+
+if [[ -z "${BRAIN_MCP_TOKEN:-}" ]]; then
+  echo "BRAIN_MCP_TOKEN is unset or empty in $ENV_FILE"
+  exit 1
+fi
+
+if [[ ! -f "$SERVER" ]]; then
+  echo "server bundle not found at $SERVER — run 'npm run build' in the repo"
+  exit 1
+fi
+
+exec node "$SERVER"
