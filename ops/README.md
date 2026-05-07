@@ -15,6 +15,10 @@ The token does **not** live in the plist. It lives in `~/.config/brain-mcp/env` 
 - `~/Library/Logs/brain-mcp.log` — script-level (launcher banner, env-file errors, anything Node writes to stdout/stderr after `exec`)
 - `~/Library/Logs/brain-mcp.launchd.log` — launchd-level (process supervision, throttle messages)
 
+## Prerequisites
+
+Homebrew node at `/opt/homebrew/bin/node` (the launcher exec's it directly, not via `which`). This is intentional: nvm-versioned paths break on every node upgrade, and sourcing nvm in a launcher is slow and fragile. Install with `brew install node`. Brew will warn that node is "shadowed by nvm" — that's expected; nvm still owns your interactive shell.
+
 ## One-time install
 
 ```sh

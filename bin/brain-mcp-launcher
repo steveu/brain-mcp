@@ -7,6 +7,7 @@ set -euo pipefail
 
 ENV_FILE="$HOME/.config/brain-mcp/env"
 SERVER="/Users/steveu/code/brain-mcp/dist/server.js"
+NODE="/opt/homebrew/bin/node"
 LOG="$HOME/Library/Logs/brain-mcp.log"
 
 exec >> "$LOG" 2>&1
@@ -28,9 +29,14 @@ if [[ -z "${BRAIN_MCP_TOKEN:-}" ]]; then
   exit 1
 fi
 
+if [[ ! -x "$NODE" ]]; then
+  echo "node not found at $NODE — install with 'brew install node'"
+  exit 1
+fi
+
 if [[ ! -f "$SERVER" ]]; then
   echo "server bundle not found at $SERVER — run 'npm run build' in the repo"
   exit 1
 fi
 
-exec node "$SERVER"
+exec "$NODE" "$SERVER"
