@@ -52,10 +52,10 @@ curl -s -X POST http://127.0.0.1:8765/mcp \
 
 ## Exposing to Claude.ai
 
-The server binds to `127.0.0.1` only. Put a tunnel in front of it
-(Tailscale Funnel or Cloudflare Tunnel), then register the public HTTPS URL
-in Claude.ai → Settings → Customize → Connectors → Add custom connector.
-Set the bearer token in the connector's auth headers.
+The server binds to `127.0.0.1` only — Funnel (or another tunnel) is the
+only public ingress. See [`docs/deploy.md`](./docs/deploy.md) for the
+one-time Tailscale Funnel + Claude.ai connector setup, including token
+rotation and the Cloudflare Tunnel alternative.
 
 ## Design notes
 
