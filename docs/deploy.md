@@ -5,6 +5,18 @@ from a Claude.ai chat". Assumes the server is already running locally — see
 [README — Run locally](../README.md#run-locally) for that — and that the
 launchd job in [`ops/README.md`](../ops/README.md) is the supervisor.
 
+> **Status (2026-05-07).** Steps 1 and 2 (Funnel + public HTTPS) and the
+> launchd supervisor work today. **Step 3 (registering the connector in
+> Claude.ai) is blocked on adding OAuth to brain-mcp** — the consumer
+> Claude.ai custom-connector UI only accepts OAuth client ID/secret,
+> with no field for `Authorization: Bearer` headers. Tracked in
+> [#4](https://github.com/steveu/brain-mcp/issues/4); upstream limitation
+> in [anthropics/claude-ai-mcp#112](https://github.com/anthropics/claude-ai-mcp/issues/112).
+>
+> Until then, bearer auth on `/mcp` still works fine from any client that
+> can send custom headers — Claude Code (via `headersHelper`), the Claude
+> API's `mcp_servers` connector field, or raw `curl`.
+
 The shape:
 
 ```
@@ -59,17 +71,28 @@ tailscale funnel --bg off
 
 ## 3. Register the connector in Claude.ai
 
+> Blocked on [#4](https://github.com/steveu/brain-mcp/issues/4) — see the
+> status note at the top of this doc. Steps below describe the intended
+> flow once OAuth is in place.
+
 1. Claude.ai → **Settings** → **Connectors** → **Add custom connector**.
 2. **Name:** `brain` (or whatever; it's only the label in the chat UI).
 3. **URL:** `https://<host>.<tailnet>.ts.net/mcp` — the same MagicDNS host
    from step 2, with the `/mcp` path. The server's MCP transport is mounted
    there; `/healthz` is unauthenticated and only for smoke-testing.
-4. **Auth:** custom header.
-   - Header name: `Authorization`
-   - Header value: `Bearer <BRAIN_MCP_TOKEN>` — the same token in
-     `~/.config/brain-mcp/env`.
+4. **Auth:** OAuth client ID + client secret issued by brain-mcp's Dynamic
+   Client Registration endpoint (`/register`).
 5. Save. Claude.ai will call `tools/list` and should show `capture` and
    `add_recipe` as available tools on the connector.
+
+In the meantime, clients that accept custom headers can use the bearer
+token directly:
+
+- **Claude Code** — point an MCP server at the same URL with a
+  `headersHelper` that emits `Authorization: Bearer $BRAIN_MCP_TOKEN`.
+- **Claude API** — pass the URL and token in the request's `mcp_servers`
+  field.
+- **Raw HTTP** — see the `curl` smoke tests in the README.
 
 ## 4. Smoke test from Claude.ai
 
