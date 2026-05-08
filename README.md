@@ -76,6 +76,15 @@ rotation and the Cloudflare Tunnel alternative.
   one-shot HTML form that asks for the token, since the public-facing
   endpoints would otherwise let anyone reaching the tunnel mint a token.
   Single-user service — no per-user state, no consent screen, no scopes.
+- **Static long-lived token is a deliberate deviation from current MCP
+  spec direction.** The 2026 authorisation spec points at short-lived
+  access tokens with refresh, ideally backed by a real authorisation
+  server (Auth0 / Stytch / WorkOS / Keycloak). For a single-user,
+  Tailscale-only deployment the practical risk is low and the cost of
+  adopting that model is high, so brain-mcp deliberately stays simple.
+  If this server ever exposes more than one user, gets reachable
+  outside the tailnet, or grows per-tool scopes, swap the static token
+  for a real AS before doing anything else.
 - **Path safety:** all vault writes go through `vaultPath(...)` which
   resolves and rejects anything outside `BRAIN_VAULT`.
 
