@@ -24,9 +24,12 @@ service in reach of Claude.ai's custom-connector flow.
   a match note at `vault/Matches/<date> — <team> vs <opposition>.md` from
   the `vault/Templates/Match.md` template, with `date` / `opposition` /
   `team` substituted into frontmatter and the H1 placeholders. Date
-  defaults to the next Saturday on or after today (Europe/London).
-  Refuses to overwrite an existing match. Other template fields (result,
-  position, etc.) are left empty for the user to fill in after the match.
+  defaults to today (Europe/London). Refuses to overwrite an existing
+  match. Other frontmatter fields are left at their template defaults:
+  result / position / minutes etc. blank for the user to fill in after
+  the match; the 11 event-tally keys (`passes_completed`, `goals`, …)
+  default to `0` and are written by [pitchside](https://github.com/steveu/pitchside)
+  during the match — `create_match` itself never touches them.
 
 ### Read (allowlist-scoped)
 
