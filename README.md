@@ -18,6 +18,13 @@ service in reach of Claude.ai's custom-connector flow.
   `vault/Recipes/<title>.md` with the given markdown body. Refuses to
   overwrite an existing file. The caller is expected to compose a body that
   already matches the vault's recipe convention.
+- `create_match(opposition: string, team: string, date?: string)` — create
+  a match note at `vault/Matches/<date> — <team> vs <opposition>.md` from
+  the `vault/Templates/Match.md` template, with `date` / `opposition` /
+  `team` substituted into frontmatter and the H1 placeholders. Date
+  defaults to the next Saturday on or after today (Europe/London).
+  Refuses to overwrite an existing match. Other template fields (result,
+  position, etc.) are left empty for the user to fill in after the match.
 
 More tools (search, person/project lookups, weekly summaries) will be added
 as they pay their way; see [the design notes](#design-notes) for the bar.

@@ -36,12 +36,44 @@ function todayInLondon(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 }
 
+function nextSaturdayInLondon(): string {
+  const parts = todayInLondon().split("-").map(Number);
+  const [y, m, d] = parts as [number, number, number];
+  const utc = new Date(Date.UTC(y, m - 1, d));
+  const daysToAdd = (6 - utc.getUTCDay() + 7) % 7;
+  const target = new Date(Date.UTC(y, m - 1, d + daysToAdd));
+  const yy = target.getUTCFullYear();
+  const mm = String(target.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(target.getUTCDate()).padStart(2, "0");
+  return `${yy}-${mm}-${dd}`;
+}
+
 function appendWithBlankLine(existing: string, addition: string): string {
   const trimmed = addition.trim();
   if (existing.length === 0) return trimmed + "\n";
   const trailingNewlines = existing.match(/\n*$/)?.[0].length ?? 0;
   const padding = "\n".repeat(Math.max(0, 2 - trailingNewlines));
   return existing + padding + trimmed + "\n";
+}
+
+function fillMatchTemplate(
+  template: string,
+  vars: { date: string; opposition: string; team: string },
+): string {
+  const setField = (src: string, field: string, value: string): string => {
+    const re = new RegExp(`^${field}:[ \\t]*$`, "m");
+    if (!re.test(src)) {
+      throw new Error(`template missing empty '${field}:' field`);
+    }
+    return src.replace(re, `${field}: ${value}`);
+  };
+  let out = template;
+  out = setField(out, "date", vars.date);
+  out = setField(out, "opposition", vars.opposition);
+  out = setField(out, "team", vars.team);
+  out = out.replaceAll("{{opposition}}", vars.opposition);
+  out = out.replaceAll("{{date}}", vars.date);
+  return out;
 }
 
 const server = new McpServer({
@@ -67,6 +99,69 @@ server.registerTool(
     writeFileSync(target, appendWithBlankLine(existing, thought), "utf8");
     return {
       content: [{ type: "text", text: `appended to ${filename}` }],
+    };
+  },
+);
+
+server.registerTool(
+  "create_match",
+  {
+    title: "Create a match note",
+    description:
+      "Create a new match note at vault/Matches/<date> — <team> vs <opposition>.md, " +
+      "based on vault/Templates/Match.md with the date / opposition / team fields and " +
+      "the H1 placeholders filled in. Date defaults to the next Saturday on or after " +
+      "today (Europe/London). Refuses to overwrite an existing match with the same name. " +
+      "Other template fields (result, position, etc.) are left for the user to fill in after the match.",
+    inputSchema: {
+      opposition: z
+        .string()
+        .min(1)
+        .describe("Opposition team name, e.g. 'Heslington'."),
+      team: z
+        .string()
+        .min(1)
+        .describe(
+          "The user's team for this match, e.g. 'Fulford FC' or 'Fulford School'. Used verbatim in frontmatter and filename.",
+        ),
+      date: z
+        .string()
+        .regex(/^\d{4}-\d{2}-\d{2}$/)
+        .optional()
+        .describe(
+          "Match date as YYYY-MM-DD. Omit to default to the next Saturday on or after today (Europe/London).",
+        ),
+    },
+  },
+  async ({ opposition, team, date }) => {
+    const cleanOpposition = opposition.replace(/[\\/\0]/g, "").trim();
+    const cleanTeam = team.replace(/[\\/\0]/g, "").trim();
+    if (!cleanOpposition) throw new Error("opposition is empty after cleaning");
+    if (!cleanTeam) throw new Error("team is empty after cleaning");
+
+    const resolvedDate = date ?? nextSaturdayInLondon();
+
+    const templatePath = vaultPath("Templates", "Match.md");
+    if (!existsSync(templatePath)) {
+      throw new Error("template not found at Templates/Match.md");
+    }
+    const template = readFileSync(templatePath, "utf8");
+    const filled = fillMatchTemplate(template, {
+      date: resolvedDate,
+      opposition: cleanOpposition,
+      team: cleanTeam,
+    });
+
+    const matchesDir = vaultPath("Matches");
+    if (!existsSync(matchesDir)) mkdirSync(matchesDir, { recursive: true });
+    const filename = `${resolvedDate} — ${cleanTeam} vs ${cleanOpposition}.md`;
+    const target = vaultPath("Matches", filename);
+    if (existsSync(target)) {
+      throw new Error(`match already exists: Matches/${filename}`);
+    }
+    writeFileSync(target, filled, "utf8");
+    return {
+      content: [{ type: "text", text: `created Matches/${filename}` }],
     };
   },
 );
