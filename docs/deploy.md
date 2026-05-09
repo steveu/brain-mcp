@@ -66,7 +66,7 @@ tailscale funnel --bg off
 
 ## 3. Register the connector in Claude.ai
 
-Set `BRAIN_MCP_PUBLIC_URL` in `~/.config/brain-mcp/env` to the same
+Set `BRAIN_MCP_PUBLIC_URL` in the repo-root `.env` to the same
 hostname Funnel exposes (no trailing slash, scheme included), e.g.
 `https://mini.tail-xxxx.ts.net`. Restart the launchd job so the OAuth
 endpoints come up:
@@ -129,13 +129,13 @@ line. If it didn't land, in order of likelihood:
 
 ## Token rotation
 
-The token sits in three places: `~/.config/brain-mcp/env`, the launched
+The token sits in three places: the repo-root `.env`, the launched
 process (in-memory), and the Claude.ai connector header. Rotate all three
 in order:
 
 ```sh
 openssl rand -hex 32                                       # 1. new token
-$EDITOR ~/.config/brain-mcp/env                            # 2. paste it
+$EDITOR ~/code/brain-mcp/.env                              # 2. paste it
 launchctl kickstart -k gui/$(id -u)/st.urm.brain-mcp       # 3. restart server
 # 4. update Authorization header in Claude.ai → Connectors → brain
 ```

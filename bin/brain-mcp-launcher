@@ -1,11 +1,11 @@
 #!/bin/bash
 # Launcher for brain-mcp under launchd.
-# Sources ~/.config/brain-mcp/env, then execs the Node server with absolute paths.
+# Sources the repo-root .env, then execs the Node server with absolute paths.
 # Driven by ~/Library/LaunchAgents/st.urm.brain-mcp.plist.
 
 set -euo pipefail
 
-ENV_FILE="$HOME/.config/brain-mcp/env"
+ENV_FILE="/Users/steveu/code/brain-mcp/.env"
 SERVER="/Users/steveu/code/brain-mcp/dist/server.js"
 NODE="/opt/homebrew/bin/node"
 LOG="$HOME/Library/Logs/brain-mcp.log"

@@ -5,10 +5,10 @@ Persistent-run setup for brain-mcp on the Mac mini, via launchd.
 ## Layout
 
 - `launchd/st.urm.brain-mcp.plist` — the launchd job. Installed into `~/Library/LaunchAgents/`.
-- `env.example` — template for `~/.config/brain-mcp/env`, the file the launcher sources at startup.
+- `../.env.example` — template for the repo-root `.env`, the file the launcher sources at startup.
 - The launcher itself lives in the repo at `bin/brain-mcp-launcher`.
 
-The token does **not** live in the plist. It lives in `~/.config/brain-mcp/env` (mode 600), which the launcher sources before exec-ing Node. Rotating the token is one file edit + one kickstart, no plist surgery.
+The token does **not** live in the plist. It lives in the repo-root `.env` (mode 600, gitignored), which the launcher sources before exec-ing Node. Rotating the token is one file edit + one kickstart, no plist surgery.
 
 ## Logs
 
@@ -28,10 +28,9 @@ npm install
 npm run build
 
 # 2. Create the env file (mode 600), populate BRAIN_MCP_TOKEN
-mkdir -p ~/.config/brain-mcp
-cp ops/env.example ~/.config/brain-mcp/env
-chmod 600 ~/.config/brain-mcp/env
-$EDITOR ~/.config/brain-mcp/env
+cp .env.example .env
+chmod 600 .env
+$EDITOR .env
 
 # 3. Install the launchd plist
 cp ops/launchd/st.urm.brain-mcp.plist ~/Library/LaunchAgents/
@@ -62,7 +61,7 @@ Re-enable with `bootstrap` again.
 ```sh
 # 1. Generate a new token, edit it into the env file
 openssl rand -hex 32  # copy the output
-$EDITOR ~/.config/brain-mcp/env  # update BRAIN_MCP_TOKEN=...
+$EDITOR .env  # update BRAIN_MCP_TOKEN=...
 
 # 2. Kickstart so the launcher re-sources the env file
 launchctl kickstart -k gui/$(id -u)/st.urm.brain-mcp
