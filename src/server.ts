@@ -5,7 +5,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { z } from "zod";
+import { AllowlistMissingError, loadAllowlist } from "./allowlist.js";
 import { createOAuthRouter } from "./oauth.js";
+import { runFetch, runGrep, runList } from "./vault.js";
 
 const VAULT = path.resolve(process.env.BRAIN_VAULT ?? path.join(homedir(), "brain", "vault"));
 const TOKEN = process.env.BRAIN_MCP_TOKEN;
@@ -14,6 +16,10 @@ const PUBLIC_URL = process.env.BRAIN_MCP_PUBLIC_URL?.replace(/\/$/, "");
 const OAUTH_STORE =
   process.env.BRAIN_MCP_OAUTH_STORE ??
   path.join(homedir(), "data", "brain-mcp", "oauth.json");
+const ALLOWLIST_PATH =
+  process.env.BRAIN_MCP_ALLOWLIST ?? path.join(path.dirname(VAULT), "allowlist");
+const AUDIT_LOG =
+  process.env.BRAIN_MCP_AUDIT_LOG ?? path.join(homedir(), "data", "brain-mcp", "audit.log");
 
 if (!TOKEN) {
   console.error("BRAIN_MCP_TOKEN is required");
@@ -22,6 +28,22 @@ if (!TOKEN) {
 if (!existsSync(VAULT)) {
   console.error(`vault not found at ${VAULT}`);
   process.exit(1);
+}
+// Fail closed at startup: missing allowlist must not silently widen exposure.
+try {
+  loadAllowlist(VAULT, ALLOWLIST_PATH);
+} catch (err) {
+  if (err instanceof AllowlistMissingError) {
+    console.error(err.message);
+  } else {
+    console.error(`failed to load allowlist at ${ALLOWLIST_PATH}: ${(err as Error).message}`);
+  }
+  process.exit(1);
+}
+
+// Re-loaded per call so edits to the allowlist file take effect without restart.
+function readAllowlistOrThrow() {
+  return loadAllowlist(VAULT, ALLOWLIST_PATH);
 }
 
 function vaultPath(...parts: string[]): string {
@@ -199,6 +221,90 @@ server.registerTool(
   },
 );
 
+server.registerTool(
+  "list",
+  {
+    title: "List allowlisted vault notes",
+    description:
+      "Recursively list the vault notes the user has chosen to expose, with each note's frontmatter and first H1 inlined so you can pick candidates without fetching every file. " +
+      "Scope is the brain-mcp allowlist (see ./allowlist in the vault repo) — anything outside is private and unavailable. " +
+      "Use this first for any question that might be answered from the vault: meal planning / cooking ideas (Recipes/), upcoming travel, jetlag, or 'where am I' questions (Travel/), the user's side projects (Projects/), or note-template references (Templates/). " +
+      "Pass an optional 'path' (vault-relative, must be inside the allowlist) to scope the listing to one folder or file. " +
+      "Wikilinks and markdown links pointing outside the allowlist are replaced with [[redacted]] / [redacted].",
+    inputSchema: {
+      path: z
+        .string()
+        .optional()
+        .describe(
+          "Optional vault-relative path to list, e.g. 'Recipes' or 'Projects/AI.md'. Must resolve inside the allowlist. Omit to list everything allowlisted.",
+        ),
+    },
+  },
+  async ({ path: listPath }) => {
+    const allowlist = readAllowlistOrThrow();
+    const text = runList({ allowlist, auditLogPath: AUDIT_LOG }, { path: listPath });
+    return { content: [{ type: "text", text }] };
+  },
+);
+
+server.registerTool(
+  "fetch",
+  {
+    title: "Fetch an allowlisted vault note",
+    description:
+      "Read a single note from the vault by path. Hard-rejected if the path is not inside the brain-mcp allowlist (see ./allowlist). " +
+      "Use after 'list' has surfaced a candidate, or when the user names a note directly. " +
+      "Wikilinks and markdown links pointing outside the allowlist are replaced with [[redacted]] / [redacted]; " +
+      "the server will not follow those links across the boundary, so don't try to fetch redacted targets.",
+    inputSchema: {
+      path: z
+        .string()
+        .min(1)
+        .describe(
+          "Vault-relative path to a note, e.g. 'Recipes/Lemon, Greens & Sausage Pasta.md'. Must resolve inside the allowlist.",
+        ),
+    },
+  },
+  async ({ path: fetchPath }) => {
+    const allowlist = readAllowlistOrThrow();
+    const text = runFetch({ allowlist, auditLogPath: AUDIT_LOG }, { path: fetchPath });
+    return { content: [{ type: "text", text }] };
+  },
+);
+
+server.registerTool(
+  "grep",
+  {
+    title: "Search allowlisted vault notes",
+    description:
+      "Case-insensitive literal substring search across allowlisted vault notes. " +
+      "Use when the listing is too long to skim or when the user asks for a keyword (ingredient, project name, place). " +
+      "Returns matches grouped by file, each as 'line-number: line-content'. " +
+      "Wikilinks and markdown links pointing outside the allowlist are replaced with [[redacted]] / [redacted] in the output. " +
+      "Pass an optional 'path' to limit the search to one allowlisted folder.",
+    inputSchema: {
+      query: z
+        .string()
+        .min(1)
+        .describe("Literal substring to search for. Case-insensitive. No regex."),
+      path: z
+        .string()
+        .optional()
+        .describe(
+          "Optional vault-relative folder to limit the search to, e.g. 'Recipes'. Must be inside the allowlist.",
+        ),
+    },
+  },
+  async ({ query, path: grepPath }) => {
+    const allowlist = readAllowlistOrThrow();
+    const text = runGrep(
+      { allowlist, auditLogPath: AUDIT_LOG },
+      { query, path: grepPath },
+    );
+    return { content: [{ type: "text", text }] };
+  },
+);
+
 const app = express();
 app.use(express.json({ limit: "1mb" }));
 
@@ -246,6 +352,6 @@ app.post("/mcp", requireBearer, async (req, res) => {
 app.listen(PORT, "127.0.0.1", () => {
   const oauthMode = PUBLIC_URL ? `oauth at ${PUBLIC_URL}` : "oauth disabled (no BRAIN_MCP_PUBLIC_URL)";
   console.log(
-    `brain-mcp listening on http://127.0.0.1:${PORT} (vault: ${VAULT}, ${oauthMode})`,
+    `brain-mcp listening on http://127.0.0.1:${PORT} (vault: ${VAULT}, allowlist: ${ALLOWLIST_PATH}, ${oauthMode})`,
   );
 });
