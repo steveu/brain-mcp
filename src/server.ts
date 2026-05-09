@@ -58,18 +58,6 @@ function todayInLondon(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 }
 
-function nextSaturdayInLondon(): string {
-  const parts = todayInLondon().split("-").map(Number);
-  const [y, m, d] = parts as [number, number, number];
-  const utc = new Date(Date.UTC(y, m - 1, d));
-  const daysToAdd = (6 - utc.getUTCDay() + 7) % 7;
-  const target = new Date(Date.UTC(y, m - 1, d + daysToAdd));
-  const yy = target.getUTCFullYear();
-  const mm = String(target.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(target.getUTCDate()).padStart(2, "0");
-  return `${yy}-${mm}-${dd}`;
-}
-
 function appendWithBlankLine(existing: string, addition: string): string {
   const trimmed = addition.trim();
   if (existing.length === 0) return trimmed + "\n";
@@ -78,23 +66,56 @@ function appendWithBlankLine(existing: string, addition: string): string {
   return existing + padding + trimmed + "\n";
 }
 
+const IMPORTANCE_VALUES = ["league", "cup", "cup-final", "friendly", "tournament"] as const;
+type Importance = (typeof IMPORTANCE_VALUES)[number];
+
 function fillMatchTemplate(
   template: string,
-  vars: { date: string; opposition: string; team: string },
+  vars: {
+    date: string;
+    opposition: string;
+    team: string;
+    pitch_type?: string;
+    pitch_condition?: string;
+    focus_area?: string;
+    importance?: Importance;
+    notes?: string;
+  },
 ): string {
-  const setField = (src: string, field: string, value: string): string => {
+  // Fills an empty frontmatter field (`field:` with only whitespace after the colon).
+  const setEmptyField = (src: string, field: string, value: string): string => {
     const re = new RegExp(`^${field}:[ \\t]*$`, "m");
     if (!re.test(src)) {
       throw new Error(`template missing empty '${field}:' field`);
     }
     return src.replace(re, `${field}: ${value}`);
   };
+  // Overrides a frontmatter field that already has a default value (`field: <value>`).
+  const overrideField = (src: string, field: string, value: string): string => {
+    const re = new RegExp(`^${field}:[ \\t]*[^\\n]*$`, "m");
+    if (!re.test(src)) {
+      throw new Error(`template missing '${field}:' field`);
+    }
+    return src.replace(re, `${field}: ${value}`);
+  };
+
   let out = template;
-  out = setField(out, "date", vars.date);
-  out = setField(out, "opposition", vars.opposition);
-  out = setField(out, "team", vars.team);
+  out = setEmptyField(out, "date", vars.date);
+  out = setEmptyField(out, "opposition", vars.opposition);
+  out = setEmptyField(out, "team", vars.team);
+  if (vars.pitch_type) out = overrideField(out, "pitch_type", vars.pitch_type);
+  if (vars.pitch_condition) out = setEmptyField(out, "pitch_condition", vars.pitch_condition);
+  if (vars.focus_area) out = setEmptyField(out, "focus_area", vars.focus_area);
+  if (vars.importance) out = overrideField(out, "importance", vars.importance);
+
   out = out.replaceAll("{{opposition}}", vars.opposition);
   out = out.replaceAll("{{date}}", vars.date);
+  out = out.replaceAll("{{notes}}", vars.notes ?? "");
+
+  if (vars.focus_area) {
+    out = out.replace(/^\*\*Area:\*\*[ \t]*$/m, `**Area:** ${vars.focus_area}`);
+  }
+
   return out;
 }
 
@@ -130,11 +151,16 @@ server.registerTool(
   {
     title: "Create a match note",
     description:
-      "Create a new match note at vault/Matches/<date> — <team> vs <opposition>.md, " +
-      "based on vault/Templates/Match.md with the date / opposition / team fields and " +
-      "the H1 placeholders filled in. Date defaults to the next Saturday on or after " +
-      "today (Europe/London). Refuses to overwrite an existing match with the same name. " +
-      "Other template fields (result, position, etc.) are left for the user to fill in after the match.",
+      "Create a match note in the vault for <team> vs <opposition>. The note is filed at " +
+      "Matches/<date> — <team> vs <opposition>.md; refuses to overwrite if a file already " +
+      "exists at that path. Returns the created vault-relative path. " +
+      "Required args: opposition, team. Optional args (omit to accept defaults): " +
+      "date (YYYY-MM-DD; defaults to today in Europe/London), " +
+      "pitch_type (defaults to 'grass'), " +
+      "importance (one of league/cup/cup-final/friendly/tournament; defaults to 'league'), " +
+      "pitch_condition, focus_area, notes (no defaults; left blank if omitted). " +
+      "Post-match fields (result, position, minutes, ratings, event tallies) are not set " +
+      "by this tool — the user fills those in directly after the match.",
     inputSchema: {
       opposition: z
         .string()
@@ -151,17 +177,60 @@ server.registerTool(
         .regex(/^\d{4}-\d{2}-\d{2}$/)
         .optional()
         .describe(
-          "Match date as YYYY-MM-DD. Omit to default to the next Saturday on or after today (Europe/London).",
+          "Match date as YYYY-MM-DD. Omit to default to today (Europe/London).",
+        ),
+      pitch_type: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Pitch surface, e.g. 'grass', '3G', 'astroturf'. Omit to keep the template default of 'grass'.",
+        ),
+      pitch_condition: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Pre-match pitch condition if known, e.g. 'wet', 'frozen'. Usually omitted — set post-match.",
+        ),
+      focus_area: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Pre-match focus area, e.g. 'using your eyes'. Fills the focus_area frontmatter field and the body 'Area:' line.",
+        ),
+      importance: z
+        .enum(IMPORTANCE_VALUES)
+        .optional()
+        .describe(
+          "Match importance. One of: league, cup, cup-final, friendly, tournament. Omit to keep the template default of 'league'.",
+        ),
+      notes: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          "Free-form pre-match context (competition name, age group, venue notes) that doesn't fit a frontmatter field. Inserted under the body's '## Context' section.",
         ),
     },
   },
-  async ({ opposition, team, date }) => {
+  async ({
+    opposition,
+    team,
+    date,
+    pitch_type,
+    pitch_condition,
+    focus_area,
+    importance,
+    notes,
+  }) => {
     const cleanOpposition = opposition.replace(/[\\/\0]/g, "").trim();
     const cleanTeam = team.replace(/[\\/\0]/g, "").trim();
     if (!cleanOpposition) throw new Error("opposition is empty after cleaning");
     if (!cleanTeam) throw new Error("team is empty after cleaning");
 
-    const resolvedDate = date ?? nextSaturdayInLondon();
+    const resolvedDate = date ?? todayInLondon();
 
     const templatePath = vaultPath("Templates", "Match.md");
     if (!existsSync(templatePath)) {
@@ -172,6 +241,11 @@ server.registerTool(
       date: resolvedDate,
       opposition: cleanOpposition,
       team: cleanTeam,
+      pitch_type: pitch_type?.trim(),
+      pitch_condition: pitch_condition?.trim(),
+      focus_area: focus_area?.trim(),
+      importance,
+      notes: notes?.trim(),
     });
 
     const matchesDir = vaultPath("Matches");
