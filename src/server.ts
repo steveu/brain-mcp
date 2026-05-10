@@ -111,10 +111,7 @@ function fillMatchTemplate(
   out = out.replaceAll("{{opposition}}", vars.opposition);
   out = out.replaceAll("{{date}}", vars.date);
   out = out.replaceAll("{{notes}}", vars.notes ?? "");
-
-  if (vars.focus_area) {
-    out = out.replace(/^\*\*Area:\*\*[ \t]*$/m, `**Area:** ${vars.focus_area}`);
-  }
+  out = out.replaceAll("{{focus_area}}", vars.focus_area ?? "");
 
   return out;
 }
@@ -198,7 +195,7 @@ server.registerTool(
         .min(1)
         .optional()
         .describe(
-          "Pre-match focus area, e.g. 'using your eyes'. Fills the focus_area frontmatter field and the body 'Area:' line.",
+          "Pre-match focus area, e.g. 'using your eyes'. Fills the focus_area frontmatter field and the {{focus_area}} placeholder in the body.",
         ),
       importance: z
         .enum(IMPORTANCE_VALUES)
