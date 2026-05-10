@@ -1,12 +1,16 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import express, { type Request, type Response, type NextFunction, type Express } from "express";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
 import { z } from "zod";
 import { loadAllowlist } from "./allowlist.js";
 import { createOAuthRouter } from "./oauth.js";
-import { runFetch, runGrep, runList } from "./vault.js";
+import { runFetch, runGrep, runList } from "./vault-read.js";
+import {
+  IMPORTANCE_VALUES,
+  runAddRecipe,
+  runCapture,
+  runCreateMatch,
+} from "./vault-write.js";
 
 export type ServerConfig = {
   vault: string;
@@ -17,78 +21,8 @@ export type ServerConfig = {
   auditLogPath: string;
 };
 
-function todayInLondon(): string {
-  return new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
-}
-
-function appendWithBlankLine(existing: string, addition: string): string {
-  const trimmed = addition.trim();
-  if (existing.length === 0) return trimmed + "\n";
-  const trailingNewlines = existing.match(/\n*$/)?.[0].length ?? 0;
-  const padding = "\n".repeat(Math.max(0, 2 - trailingNewlines));
-  return existing + padding + trimmed + "\n";
-}
-
-const IMPORTANCE_VALUES = ["league", "cup", "cup-final", "friendly", "tournament"] as const;
-type Importance = (typeof IMPORTANCE_VALUES)[number];
-
-export function fillMatchTemplate(
-  template: string,
-  vars: {
-    date: string;
-    opposition: string;
-    team: string;
-    pitch_type?: string;
-    pitch_condition?: string;
-    focus_area?: string;
-    importance?: Importance;
-    notes?: string;
-  },
-): string {
-  // Fills an empty frontmatter field (`field:` with only whitespace after the colon).
-  const setEmptyField = (src: string, field: string, value: string): string => {
-    const re = new RegExp(`^${field}:[ \\t]*$`, "m");
-    if (!re.test(src)) {
-      throw new Error(`template missing empty '${field}:' field`);
-    }
-    return src.replace(re, `${field}: ${value}`);
-  };
-  // Overrides a frontmatter field that already has a default value (`field: <value>`).
-  const overrideField = (src: string, field: string, value: string): string => {
-    const re = new RegExp(`^${field}:[ \\t]*[^\\n]*$`, "m");
-    if (!re.test(src)) {
-      throw new Error(`template missing '${field}:' field`);
-    }
-    return src.replace(re, `${field}: ${value}`);
-  };
-
-  let out = template;
-  out = setEmptyField(out, "date", vars.date);
-  out = setEmptyField(out, "opposition", vars.opposition);
-  out = setEmptyField(out, "team", vars.team);
-  if (vars.pitch_type) out = overrideField(out, "pitch_type", vars.pitch_type);
-  if (vars.pitch_condition) out = setEmptyField(out, "pitch_condition", vars.pitch_condition);
-  if (vars.focus_area) out = setEmptyField(out, "focus_area", vars.focus_area);
-  if (vars.importance) out = overrideField(out, "importance", vars.importance);
-
-  out = out.replaceAll("{{opposition}}", vars.opposition);
-  out = out.replaceAll("{{date}}", vars.date);
-  out = out.replaceAll("{{notes}}", vars.notes ?? "");
-  out = out.replaceAll("{{focus_area}}", vars.focus_area ?? "");
-
-  return out;
-}
-
 export function createServer(config: ServerConfig): Express {
   const { vault, token, publicUrl, oauthStorePath, allowlistPath, auditLogPath } = config;
-
-  function vaultPath(...parts: string[]): string {
-    const target = path.resolve(vault, ...parts);
-    if (target !== vault && !target.startsWith(vault + path.sep)) {
-      throw new Error("path escapes vault");
-    }
-    return target;
-  }
 
   // Re-loaded per call so edits to the allowlist file take effect without restart.
   function readAllowlistOrThrow() {
@@ -112,13 +46,8 @@ export function createServer(config: ServerConfig): Express {
       },
     },
     async ({ thought }) => {
-      const filename = `${todayInLondon()}.md`;
-      const target = vaultPath(filename);
-      const existing = existsSync(target) ? readFileSync(target, "utf8") : "";
-      writeFileSync(target, appendWithBlankLine(existing, thought), "utf8");
-      return {
-        content: [{ type: "text", text: `appended to ${filename}` }],
-      };
+      const text = runCapture({ vault }, { thought });
+      return { content: [{ type: "text", text }] };
     },
   );
 
@@ -191,50 +120,9 @@ export function createServer(config: ServerConfig): Express {
           ),
       },
     },
-    async ({
-      opposition,
-      team,
-      date,
-      pitch_type,
-      pitch_condition,
-      focus_area,
-      importance,
-      notes,
-    }) => {
-      const cleanOpposition = opposition.replace(/[\\/\0]/g, "").trim();
-      const cleanTeam = team.replace(/[\\/\0]/g, "").trim();
-      if (!cleanOpposition) throw new Error("opposition is empty after cleaning");
-      if (!cleanTeam) throw new Error("team is empty after cleaning");
-
-      const resolvedDate = date ?? todayInLondon();
-
-      const templatePath = vaultPath("Templates", "Match.md");
-      if (!existsSync(templatePath)) {
-        throw new Error("template not found at Templates/Match.md");
-      }
-      const template = readFileSync(templatePath, "utf8");
-      const filled = fillMatchTemplate(template, {
-        date: resolvedDate,
-        opposition: cleanOpposition,
-        team: cleanTeam,
-        pitch_type: pitch_type?.trim(),
-        pitch_condition: pitch_condition?.trim(),
-        focus_area: focus_area?.trim(),
-        importance,
-        notes: notes?.trim(),
-      });
-
-      const matchesDir = vaultPath("Matches");
-      if (!existsSync(matchesDir)) mkdirSync(matchesDir, { recursive: true });
-      const filename = `${resolvedDate} — ${cleanTeam} vs ${cleanOpposition}.md`;
-      const target = vaultPath("Matches", filename);
-      if (existsSync(target)) {
-        throw new Error(`match already exists: Matches/${filename}`);
-      }
-      writeFileSync(target, filled, "utf8");
-      return {
-        content: [{ type: "text", text: `created Matches/${filename}` }],
-      };
+    async (args) => {
+      const text = runCreateMatch({ vault }, args);
+      return { content: [{ type: "text", text }] };
     },
   );
 
@@ -255,19 +143,8 @@ export function createServer(config: ServerConfig): Express {
       },
     },
     async ({ title, body }) => {
-      const cleanedTitle = title.replace(/[\\/\0]/g, "").trim();
-      if (!cleanedTitle) throw new Error("title is empty after cleaning");
-      const recipesDir = vaultPath("Recipes");
-      if (!existsSync(recipesDir)) mkdirSync(recipesDir, { recursive: true });
-      const target = vaultPath("Recipes", `${cleanedTitle}.md`);
-      if (existsSync(target)) {
-        throw new Error(`recipe already exists: Recipes/${cleanedTitle}.md`);
-      }
-      const content = body.endsWith("\n") ? body : body + "\n";
-      writeFileSync(target, content, "utf8");
-      return {
-        content: [{ type: "text", text: `created Recipes/${cleanedTitle}.md` }],
-      };
+      const text = runAddRecipe({ vault }, { title, body });
+      return { content: [{ type: "text", text }] };
     },
   );
 

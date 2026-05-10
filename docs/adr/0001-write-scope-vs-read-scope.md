@@ -1,0 +1,5 @@
+# Writes are vault-scoped; reads are allowlist-scoped
+
+The vault has two trust boundaries, not one. Read tools (`list`, `fetch`, `grep`) only see paths inside the allowlist file (`./allowlist`); anything outside is treated as private and replaced with `[redacted]` even when linked from an allowlisted note. Write tools (`capture`, `add_recipe`, `create_match`) target fixed roots under the vault root (`Matches/`, `Recipes/`, the daily note) and do not consult the allowlist — the allowlist constrains what the agent can *see*, not where it can *write*.
+
+This is deliberate: making writes go through the allowlist would either force the user to allowlist the daily-note folder (widening the read surface) or invent a parallel write-allowlist (more configuration, no real benefit for a single-user side project). The cost is that the two scope models must stay distinct in the code — reflected in the `vault-read.ts` / `vault-write.ts` split and the separate `ReadDeps` / `WriteDeps` types — so a future change can't quietly collapse them by accident.

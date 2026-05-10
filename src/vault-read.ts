@@ -14,7 +14,7 @@ const FRONTMATTER_LINE_CAP = 12;
 const GREP_MAX_MATCHES = 200;
 const GREP_LINE_CAP = 240;
 
-export type ToolDeps = {
+export type ReadDeps = {
   allowlist: Allowlist;
   auditLogPath: string;
 };
@@ -72,7 +72,7 @@ function indentLines(text: string, prefix: string): string {
 
 // ----- list ---------------------------------------------------------------
 
-export function runList(deps: ToolDeps, args: ListArgs): string {
+export function runList(deps: ReadDeps, args: ListArgs): string {
   const { allowlist } = deps;
   const index = buildAllowlistIndex(allowlist);
   const lines: string[] = [];
@@ -217,7 +217,7 @@ function renderFile(
 
 // ----- fetch --------------------------------------------------------------
 
-export function runFetch(deps: ToolDeps, args: FetchArgs): string {
+export function runFetch(deps: ReadDeps, args: FetchArgs): string {
   const { allowlist } = deps;
   const resolved = resolveScopedPath(allowlist, args.path);
   if (!resolved) {
@@ -251,7 +251,7 @@ export function runFetch(deps: ToolDeps, args: FetchArgs): string {
 
 // ----- grep ---------------------------------------------------------------
 
-export function runGrep(deps: ToolDeps, args: GrepArgs): string {
+export function runGrep(deps: ReadDeps, args: GrepArgs): string {
   const { allowlist } = deps;
   const query = args.query;
   if (!query) throw new Error("query is required");
