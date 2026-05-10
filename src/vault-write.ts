@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import path from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { read, resolveUnderVault } from "./vault-fs.js";
 
 export type WriteDeps = {
   vault: string;
@@ -33,14 +33,6 @@ export type CreateMatchArgs = {
   importance?: Importance;
   notes?: string;
 };
-
-function vaultPath(vault: string, ...parts: string[]): string {
-  const target = path.resolve(vault, ...parts);
-  if (target !== vault && !target.startsWith(vault + path.sep)) {
-    throw new Error("path escapes vault");
-  }
-  return target;
-}
 
 function todayInLondon(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
@@ -106,8 +98,8 @@ function fillMatchTemplate(
 
 export function runCapture(deps: WriteDeps, args: CaptureArgs): string {
   const filename = `${todayInLondon()}.md`;
-  const target = vaultPath(deps.vault, filename);
-  const existing = existsSync(target) ? readFileSync(target, "utf8") : "";
+  const target = resolveUnderVault(deps.vault, filename);
+  const existing = existsSync(target) ? read(target) : "";
   writeFileSync(target, appendWithBlankLine(existing, args.thought), "utf8");
   return `appended to ${filename}`;
 }
@@ -117,9 +109,9 @@ export function runCapture(deps: WriteDeps, args: CaptureArgs): string {
 export function runAddRecipe(deps: WriteDeps, args: AddRecipeArgs): string {
   const cleanedTitle = args.title.replace(/[\\/\0]/g, "").trim();
   if (!cleanedTitle) throw new Error("title is empty after cleaning");
-  const recipesDir = vaultPath(deps.vault, "Recipes");
+  const recipesDir = resolveUnderVault(deps.vault, "Recipes");
   if (!existsSync(recipesDir)) mkdirSync(recipesDir, { recursive: true });
-  const target = vaultPath(deps.vault, "Recipes", `${cleanedTitle}.md`);
+  const target = resolveUnderVault(deps.vault, "Recipes", `${cleanedTitle}.md`);
   if (existsSync(target)) {
     throw new Error(`recipe already exists: Recipes/${cleanedTitle}.md`);
   }
@@ -138,11 +130,11 @@ export function runCreateMatch(deps: WriteDeps, args: CreateMatchArgs): string {
 
   const resolvedDate = args.date ?? todayInLondon();
 
-  const templatePath = vaultPath(deps.vault, "Templates", "Match.md");
+  const templatePath = resolveUnderVault(deps.vault, "Templates", "Match.md");
   if (!existsSync(templatePath)) {
     throw new Error("template not found at Templates/Match.md");
   }
-  const template = readFileSync(templatePath, "utf8");
+  const template = read(templatePath);
   const filled = fillMatchTemplate(template, {
     date: resolvedDate,
     opposition: cleanOpposition,
@@ -154,10 +146,10 @@ export function runCreateMatch(deps: WriteDeps, args: CreateMatchArgs): string {
     notes: args.notes?.trim(),
   });
 
-  const matchesDir = vaultPath(deps.vault, "Matches");
+  const matchesDir = resolveUnderVault(deps.vault, "Matches");
   if (!existsSync(matchesDir)) mkdirSync(matchesDir, { recursive: true });
   const filename = `${resolvedDate} — ${cleanTeam} vs ${cleanOpposition}.md`;
-  const target = vaultPath(deps.vault, "Matches", filename);
+  const target = resolveUnderVault(deps.vault, "Matches", filename);
   if (existsSync(target)) {
     throw new Error(`match already exists: Matches/${filename}`);
   }

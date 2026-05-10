@@ -1,6 +1,7 @@
-import { existsSync, readdirSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
-import { type Allowlist, findContainingEntry } from "./allowlist.js";
+import type { Allowlist } from "./allowlist.js";
+import { findContainingEntry, walk } from "./vault-fs.js";
 
 // Index of basenames (without extension) that exist *within* the allowlist.
 // Built once per call so wikilink lookups are O(1) and don't re-stat the FS
@@ -12,30 +13,16 @@ export type AllowlistIndex = {
 export function buildAllowlistIndex(allowlist: Allowlist): AllowlistIndex {
   const byBasename = new Map<string, string[]>();
   for (const entry of allowlist.entries) {
-    walk(entry.absolutePath, (abs) => {
-      if (!abs.toLowerCase().endsWith(".md")) return;
-      const base = path.basename(abs, path.extname(abs));
+    for (const item of walk(entry.absolutePath, entry)) {
+      if (item.kind !== "file") continue;
+      if (!item.abs.toLowerCase().endsWith(".md")) continue;
+      const base = path.basename(item.abs, path.extname(item.abs));
       const arr = byBasename.get(base) ?? [];
-      arr.push(abs);
+      arr.push(item.abs);
       byBasename.set(base, arr);
-    });
+    }
   }
   return { byBasename };
-}
-
-function walk(dir: string, visit: (abs: string) => void): void {
-  let entries;
-  try {
-    entries = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const e of entries) {
-    const abs = path.join(dir, e.name);
-    if (e.isSymbolicLink()) continue;
-    if (e.isDirectory()) walk(abs, visit);
-    else if (e.isFile()) visit(abs);
-  }
 }
 
 export type RedactResult = {

@@ -1,14 +1,14 @@
-import { readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
+import { statSync } from "node:fs";
 import path from "node:path";
-import {
-  type Allowlist,
-  type AllowlistEntry,
-  findContainingEntry,
-  resolveScopedPath,
-  vaultRelativeOf,
-} from "./allowlist.js";
+import type { Allowlist, AllowlistEntry } from "./allowlist.js";
 import { appendAudit } from "./audit.js";
 import { buildAllowlistIndex, redactLinks } from "./redact.js";
+import {
+  read,
+  resolveInAllowlist,
+  vaultRelativeOf,
+  walk,
+} from "./vault-fs.js";
 
 const FRONTMATTER_LINE_CAP = 12;
 const GREP_MAX_MATCHES = 200;
@@ -41,10 +41,6 @@ function bumpBucket(b: Bucket, prefix: string, by: number): void {
 
 function ts(): string {
   return new Date().toISOString();
-}
-
-function readMd(absolutePath: string): string {
-  return readFileSync(absolutePath, "utf8");
 }
 
 type Frontmatter = {
@@ -80,7 +76,7 @@ export function runList(deps: ReadDeps, args: ListArgs): string {
   const redactions: Bucket = {};
 
   if (args.path) {
-    const resolved = resolveScopedPath(allowlist, args.path);
+    const resolved = resolveInAllowlist(allowlist, args.path);
     if (!resolved) {
       throw new Error(`path not in allowlist: ${args.path}`);
     }
@@ -92,14 +88,14 @@ export function runList(deps: ReadDeps, args: ListArgs): string {
     }
     if (stats.isDirectory()) {
       lines.push(`${vaultRelativeOf(allowlist, resolved.absolutePath)}/`);
-      walkAndRender(allowlist, index, resolved.entry, resolved.absolutePath, 1, lines, pathsReturned, redactions);
+      walkAndRender(allowlist, index, resolved.entry, resolved.absolutePath, lines, pathsReturned, redactions);
     } else {
       renderFile(allowlist, index, resolved.entry, resolved.absolutePath, 0, lines, pathsReturned, redactions);
     }
   } else {
     for (const entry of allowlist.entries) {
       lines.push(`${entry.vaultRelative}`);
-      walkAndRender(allowlist, index, entry, entry.absolutePath, 1, lines, pathsReturned, redactions);
+      walkAndRender(allowlist, index, entry, entry.absolutePath, lines, pathsReturned, redactions);
     }
   }
 
@@ -121,49 +117,17 @@ function walkAndRender(
   allowlist: Allowlist,
   index: ReturnType<typeof buildAllowlistIndex>,
   entry: AllowlistEntry,
-  dir: string,
-  depth: number,
+  root: string,
   lines: string[],
   pathsReturned: string[],
   redactions: Bucket,
 ): void {
-  let dirents;
-  try {
-    dirents = readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  // Sort: directories first, then files, both alphabetical.
-  dirents.sort((a, b) => {
-    const ad = a.isDirectory() ? 0 : 1;
-    const bd = b.isDirectory() ? 0 : 1;
-    if (ad !== bd) return ad - bd;
-    return a.name.localeCompare(b.name);
-  });
-  const indent = "  ".repeat(depth);
-  for (const d of dirents) {
-    if (d.name.startsWith(".")) continue;
-    const abs = path.join(dir, d.name);
-    if (d.isSymbolicLink()) {
-      // Resolve, only follow if still inside the same allowlisted entry.
-      let canonical: string;
-      try {
-        canonical = realpathSync(abs);
-      } catch {
-        continue;
-      }
-      if (
-        canonical !== entry.absolutePath &&
-        !canonical.startsWith(entry.absolutePath + path.sep)
-      ) {
-        continue;
-      }
-    }
-    if (d.isDirectory()) {
-      lines.push(`${indent}${d.name}/`);
-      walkAndRender(allowlist, index, entry, abs, depth + 1, lines, pathsReturned, redactions);
-    } else if (d.isFile()) {
-      renderFile(allowlist, index, entry, abs, depth, lines, pathsReturned, redactions);
+  for (const item of walk(root, entry)) {
+    const indent = "  ".repeat(item.depth);
+    if (item.kind === "dir") {
+      lines.push(`${indent}${path.basename(item.abs)}/`);
+    } else {
+      renderFile(allowlist, index, entry, item.abs, item.depth, lines, pathsReturned, redactions);
     }
   }
 }
@@ -190,7 +154,7 @@ function renderFile(
 
   let text;
   try {
-    text = readMd(abs);
+    text = read(abs);
   } catch {
     lines.push(`${indent}${name} (unreadable)`);
     return;
@@ -219,7 +183,7 @@ function renderFile(
 
 export function runFetch(deps: ReadDeps, args: FetchArgs): string {
   const { allowlist } = deps;
-  const resolved = resolveScopedPath(allowlist, args.path);
+  const resolved = resolveInAllowlist(allowlist, args.path);
   if (!resolved) {
     throw new Error(`path not in allowlist: ${args.path}`);
   }
@@ -232,7 +196,7 @@ export function runFetch(deps: ReadDeps, args: FetchArgs): string {
   if (!stats.isFile()) {
     throw new Error(`path is not a file: ${args.path}`);
   }
-  const text = readFileSync(resolved.absolutePath, "utf8");
+  const text = read(resolved.absolutePath);
   const index = buildAllowlistIndex(allowlist);
   const redacted = redactLinks(text, allowlist, index);
 
@@ -263,17 +227,17 @@ export function runGrep(deps: ReadDeps, args: GrepArgs): string {
   const redactions: Bucket = {};
   let matchCount = 0;
 
-  const roots: AllowlistEntry[] = (() => {
-    if (!args.path) return allowlist.entries;
-    const resolved = resolveScopedPath(allowlist, args.path);
+  type Root = { entry: AllowlistEntry; start: string };
+  const roots: Root[] = (() => {
+    if (!args.path) {
+      return allowlist.entries.map((entry) => ({ entry, start: entry.absolutePath }));
+    }
+    const resolved = resolveInAllowlist(allowlist, args.path);
     if (!resolved) throw new Error(`path not in allowlist: ${args.path}`);
-    return [resolved.entry];
+    return [{ entry: resolved.entry, start: resolved.absolutePath }];
   })();
 
-  outer: for (const entry of roots) {
-    const start = args.path
-      ? resolveScopedPath(allowlist, args.path)?.absolutePath ?? entry.absolutePath
-      : entry.absolutePath;
+  outer: for (const { entry, start } of roots) {
     const files: string[] = [];
     collectMd(start, entry, files);
     files.sort();
@@ -281,7 +245,7 @@ export function runGrep(deps: ReadDeps, args: GrepArgs): string {
     for (const file of files) {
       let text;
       try {
-        text = readFileSync(file, "utf8");
+        text = read(file);
       } catch {
         continue;
       }
@@ -340,33 +304,9 @@ function collectMd(start: string, entry: AllowlistEntry, out: string[]): void {
     return;
   }
   if (!stats.isDirectory()) return;
-  let dirents;
-  try {
-    dirents = readdirSync(start, { withFileTypes: true });
-  } catch {
-    return;
-  }
-  for (const d of dirents) {
-    if (d.name.startsWith(".")) continue;
-    const abs = path.join(start, d.name);
-    if (d.isSymbolicLink()) {
-      let canonical: string;
-      try {
-        canonical = realpathSync(abs);
-      } catch {
-        continue;
-      }
-      if (
-        canonical !== entry.absolutePath &&
-        !canonical.startsWith(entry.absolutePath + path.sep)
-      ) {
-        continue;
-      }
+  for (const item of walk(start, entry)) {
+    if (item.kind === "file" && item.abs.toLowerCase().endsWith(".md")) {
+      out.push(item.abs);
     }
-    if (d.isDirectory()) collectMd(abs, entry, out);
-    else if (d.isFile() && abs.toLowerCase().endsWith(".md")) out.push(abs);
   }
 }
-
-// Re-export for the server file.
-export { findContainingEntry };
