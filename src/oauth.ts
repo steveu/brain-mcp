@@ -184,10 +184,7 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
       res.status(400).json({ error: "invalid_grant", error_description: "PKCE failed" });
       return;
     }
-    if (
-      typeof body.resource !== "string" ||
-      normResource(body.resource) !== normResource(stored.resource)
-    ) {
+    if (!isAllowedTokenResource(body.resource, stored.resource)) {
       res.status(400).json({ error: "invalid_target" });
       return;
     }
@@ -234,7 +231,7 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
       return { ok: false, error: "invalid_request", description: "code_challenge_method must be S256" };
     }
     const requestedResource = get("resource");
-    if (!requestedResource || normResource(requestedResource) !== normResource(resource)) {
+    if (!isAllowedRequestedResource(requestedResource, resource)) {
       return { ok: false, error: "invalid_target", description: `resource must be ${resource}` };
     }
     return {
@@ -244,7 +241,7 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
         redirectUri,
         codeChallenge,
         state: get("state") ?? "",
-        requestedResource,
+        requestedResource: requestedResource ?? resource,
       },
     };
   }
@@ -284,6 +281,23 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
 
 function normResource(r: string): string {
   return r.replace(/\/$/, "");
+}
+
+export function isAllowedRequestedResource(
+  requestedResource: string | undefined,
+  resource: string,
+): boolean {
+  return requestedResource === undefined || normResource(requestedResource) === normResource(resource);
+}
+
+export function isAllowedTokenResource(
+  requestedResource: unknown,
+  storedResource: string,
+): boolean {
+  return (
+    typeof requestedResource !== "string" ||
+    normResource(requestedResource) === normResource(storedResource)
+  );
 }
 
 function isValidRedirectUri(uri: string): boolean {
