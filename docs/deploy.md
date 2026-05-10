@@ -18,7 +18,7 @@ The shape:
 Claude.ai  →  https://<host>.<tailnet>.ts.net  →  Tailscale Funnel  →  127.0.0.1:8765
 ```
 
-The server binds to `127.0.0.1` only (see `src/server.ts`) — the tunnel is
+The server binds to `127.0.0.1` only (see `src/main.ts`) — the tunnel is
 the only public ingress. If Funnel ever drops, the service goes dark rather
 than fails open on `0.0.0.0`. Defence in depth.
 

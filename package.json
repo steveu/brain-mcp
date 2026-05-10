@@ -3,11 +3,11 @@
   "version": "0.1.0",
   "description": "MCP server exposing personal Obsidian vault operations to Claude.ai.",
   "type": "module",
-  "main": "dist/server.js",
+  "main": "dist/main.js",
   "scripts": {
     "build": "tsc",
-    "dev": "tsx watch src/server.ts",
-    "start": "node dist/server.js",
+    "dev": "tsx watch src/main.ts",
+    "start": "node dist/main.js",
     "typecheck": "tsc --noEmit"
   },
   "license": "MIT",
