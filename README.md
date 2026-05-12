@@ -53,9 +53,11 @@ falls outside the allowlist is replaced with `[[redacted]]` / `[redacted]`,
 aliases dropped. Defence in depth — the primary boundary is the allowlist
 itself.
 
-Every call appends a JSONL line to `BRAIN_MCP_AUDIT_LOG` (default
+Every read call appends a JSONL line to `BRAIN_MCP_AUDIT_LOG` (default
 `~/data/brain-mcp/audit.log`): timestamp, tool, args, paths returned,
-redaction count by allowlist prefix. No content.
+redaction count by allowlist prefix. No content. Writes (`capture`,
+`add_recipe`, `create_match`) are deliberately not audited — see
+[`docs/adr/0003`](./docs/adr/0003-writes-are-not-audited.md).
 
 More tools (person/project lookups, weekly summaries) will be added as they
 pay their way; see [the design notes](#design-notes) for the bar.
@@ -125,10 +127,12 @@ rotation and the Cloudflare Tunnel alternative.
   If this server ever exposes more than one user, gets reachable
   outside the tailnet, or grows per-tool scopes, swap the static token
   for a real AS before doing anything else.
-- **Path safety:** all vault writes go through `vaultPath(...)` which
-  resolves and rejects anything outside `BRAIN_VAULT`. Read tools resolve
-  through `path.resolve` + canonical `realpath` and reject anything outside
-  an allowlisted root, so symlinks and `..` can't escape the boundary.
+- **Path safety:** all vault writes go through `resolveUnderVault(...)`
+  in `src/vault-fs.ts`, which resolves and rejects anything outside
+  `BRAIN_VAULT`. Read tools resolve through `resolveInAllowlist(...)`
+  (same module) which canonicalises via `realpath` and rejects anything
+  outside an allowlisted root, so symlinks and `..` can't escape the
+  boundary.
 - **Read scope is config, not code.** The `BRAIN_MCP_ALLOWLIST` file is the
   source of truth for what the read tools may expose. It's re-read on every
   call, so editing it updates exposure without restart. Adding a path is
