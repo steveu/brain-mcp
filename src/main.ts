@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { AllowlistMissingError, loadAllowlist } from "./allowlist.js";
+import { fileAuditSink } from "./audit.js";
 import { createServer, type ServerConfig } from "./server.js";
 
 function readConfig(): { config: ServerConfig; port: number } {
@@ -40,7 +41,14 @@ function readConfig(): { config: ServerConfig; port: number } {
   }
 
   return {
-    config: { vault, token, publicUrl, oauthStorePath, allowlistPath, auditLogPath },
+    config: {
+      vault,
+      token,
+      publicUrl,
+      oauthStorePath,
+      allowlistPath,
+      audit: fileAuditSink(auditLogPath),
+    },
     port,
   };
 }

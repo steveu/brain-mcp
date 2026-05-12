@@ -3,6 +3,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import express, { type Request, type Response, type NextFunction, type Express } from "express";
 import { z } from "zod";
 import { loadAllowlist } from "./allowlist.js";
+import type { AuditSink } from "./audit.js";
 import { createOAuthRouter } from "./oauth.js";
 import { runFetch, runGrep, runList } from "./vault-read.js";
 import {
@@ -18,11 +19,11 @@ export type ServerConfig = {
   publicUrl?: string;
   oauthStorePath: string;
   allowlistPath: string;
-  auditLogPath: string;
+  audit: AuditSink;
 };
 
 export function createServer(config: ServerConfig): Express {
-  const { vault, token, publicUrl, oauthStorePath, allowlistPath, auditLogPath } = config;
+  const { vault, token, publicUrl, oauthStorePath, allowlistPath, audit } = config;
 
   // Re-loaded per call so edits to the allowlist file take effect without restart.
   function readAllowlistOrThrow() {
@@ -169,7 +170,7 @@ export function createServer(config: ServerConfig): Express {
     },
     async ({ path: listPath }) => {
       const allowlist = readAllowlistOrThrow();
-      const text = runList({ allowlist, auditLogPath }, { path: listPath });
+      const text = runList({ allowlist, audit }, { path: listPath });
       return { content: [{ type: "text", text }] };
     },
   );
@@ -194,7 +195,7 @@ export function createServer(config: ServerConfig): Express {
     },
     async ({ path: fetchPath }) => {
       const allowlist = readAllowlistOrThrow();
-      const text = runFetch({ allowlist, auditLogPath }, { path: fetchPath });
+      const text = runFetch({ allowlist, audit }, { path: fetchPath });
       return { content: [{ type: "text", text }] };
     },
   );
@@ -225,7 +226,7 @@ export function createServer(config: ServerConfig): Express {
     async ({ query, path: grepPath }) => {
       const allowlist = readAllowlistOrThrow();
       const text = runGrep(
-        { allowlist, auditLogPath },
+        { allowlist, audit },
         { query, path: grepPath },
       );
       return { content: [{ type: "text", text }] };

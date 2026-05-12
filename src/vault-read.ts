@@ -1,7 +1,7 @@
 import { statSync } from "node:fs";
 import path from "node:path";
 import type { Allowlist, AllowlistEntry } from "./allowlist.js";
-import { appendAudit } from "./audit.js";
+import type { AuditSink } from "./audit.js";
 import { buildAllowlistIndex, redactLinks } from "./redact.js";
 import {
   read,
@@ -16,7 +16,7 @@ const GREP_LINE_CAP = 240;
 
 export type ReadDeps = {
   allowlist: Allowlist;
-  auditLogPath: string;
+  audit: AuditSink;
 };
 
 export type ListArgs = {
@@ -99,7 +99,7 @@ export function runList(deps: ReadDeps, args: ListArgs): string {
     }
   }
 
-  appendAudit(deps.auditLogPath, {
+  deps.audit.record({
     ts: ts(),
     tool: "list",
     args: { path: args.path ?? null },
@@ -200,7 +200,7 @@ export function runFetch(deps: ReadDeps, args: FetchArgs): string {
   const index = buildAllowlistIndex(allowlist);
   const redacted = redactLinks(text, allowlist, index);
 
-  appendAudit(deps.auditLogPath, {
+  deps.audit.record({
     ts: ts(),
     tool: "fetch",
     args: { path: args.path },
@@ -280,7 +280,7 @@ export function runGrep(deps: ReadDeps, args: GrepArgs): string {
     }
   }
 
-  appendAudit(deps.auditLogPath, {
+  deps.audit.record({
     ts: ts(),
     tool: "grep",
     args: { query, path: args.path ?? null },
