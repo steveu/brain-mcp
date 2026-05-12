@@ -1,27 +1,16 @@
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
-import { read, resolveUnderVault } from "./vault-fs.js";
+import { z } from "zod";
+import { read, resolveUnderVault } from "../vault-fs.js";
+import type { WriteDeps, WriteTool } from "./types.js";
 
-export type WriteDeps = {
-  vault: string;
-};
-
-export type CaptureArgs = {
-  thought: string;
-};
-
-export type AddRecipeArgs = {
-  title: string;
-  body: string;
-};
-
-export const IMPORTANCE_VALUES = [
+const IMPORTANCE_VALUES = [
   "league",
   "cup",
   "cup-final",
   "friendly",
   "tournament",
 ] as const;
-export type Importance = (typeof IMPORTANCE_VALUES)[number];
+type Importance = (typeof IMPORTANCE_VALUES)[number];
 
 export type CreateMatchArgs = {
   opposition: string;
@@ -36,14 +25,6 @@ export type CreateMatchArgs = {
 
 function todayInLondon(): string {
   return new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
-}
-
-function appendWithBlankLine(existing: string, addition: string): string {
-  const trimmed = addition.trim();
-  if (existing.length === 0) return trimmed + "\n";
-  const trailingNewlines = existing.match(/\n*$/)?.[0].length ?? 0;
-  const padding = "\n".repeat(Math.max(0, 2 - trailingNewlines));
-  return existing + padding + trimmed + "\n";
 }
 
 // Fills an empty frontmatter field (`field:` with only whitespace after the colon).
@@ -94,34 +75,6 @@ function fillMatchTemplate(
   return out;
 }
 
-// ----- capture ------------------------------------------------------------
-
-export function runCapture(deps: WriteDeps, args: CaptureArgs): string {
-  const filename = `${todayInLondon()}.md`;
-  const target = resolveUnderVault(deps.vault, filename);
-  const existing = existsSync(target) ? read(target) : "";
-  writeFileSync(target, appendWithBlankLine(existing, args.thought), "utf8");
-  return `appended to ${filename}`;
-}
-
-// ----- add_recipe ---------------------------------------------------------
-
-export function runAddRecipe(deps: WriteDeps, args: AddRecipeArgs): string {
-  const cleanedTitle = args.title.replace(/[\\/\0]/g, "").trim();
-  if (!cleanedTitle) throw new Error("title is empty after cleaning");
-  const recipesDir = resolveUnderVault(deps.vault, "Recipes");
-  if (!existsSync(recipesDir)) mkdirSync(recipesDir, { recursive: true });
-  const target = resolveUnderVault(deps.vault, "Recipes", `${cleanedTitle}.md`);
-  if (existsSync(target)) {
-    throw new Error(`recipe already exists: Recipes/${cleanedTitle}.md`);
-  }
-  const content = args.body.endsWith("\n") ? args.body : args.body + "\n";
-  writeFileSync(target, content, "utf8");
-  return `created Recipes/${cleanedTitle}.md`;
-}
-
-// ----- create_match -------------------------------------------------------
-
 export function runCreateMatch(deps: WriteDeps, args: CreateMatchArgs): string {
   const cleanOpposition = args.opposition.replace(/[\\/\0]/g, "").trim();
   const cleanTeam = args.team.replace(/[\\/\0]/g, "").trim();
@@ -156,3 +109,73 @@ export function runCreateMatch(deps: WriteDeps, args: CreateMatchArgs): string {
   writeFileSync(target, filled, "utf8");
   return `created Matches/${filename}`;
 }
+
+export const createMatchTool: WriteTool<CreateMatchArgs> = {
+  name: "create_match",
+  title: "Create a match note",
+  description:
+    "Create a match note in the vault for <team> vs <opposition>. The note is filed at " +
+    "Matches/<date> — <team> vs <opposition>.md; refuses to overwrite if a file already " +
+    "exists at that path. Returns the created vault-relative path. " +
+    "Required args: opposition, team. Optional args (omit to accept defaults): " +
+    "date (YYYY-MM-DD; defaults to today in Europe/London), " +
+    "pitch_type (defaults to 'grass'), " +
+    "importance (one of league/cup/cup-final/friendly/tournament; defaults to 'league'), " +
+    "pitch_condition, focus_area, notes (no defaults; left blank if omitted). " +
+    "Post-match fields (result, position, minutes, ratings, event tallies) are not set " +
+    "by this tool — the user fills those in directly after the match.",
+  inputSchema: {
+    opposition: z
+      .string()
+      .min(1)
+      .describe("Opposition team name, e.g. 'Heslington'."),
+    team: z
+      .string()
+      .min(1)
+      .describe(
+        "The user's team for this match, e.g. 'Fulford FC' or 'Fulford School'. Used verbatim in frontmatter and filename.",
+      ),
+    date: z
+      .string()
+      .regex(/^\d{4}-\d{2}-\d{2}$/)
+      .optional()
+      .describe(
+        "Match date as YYYY-MM-DD. Omit to default to today (Europe/London).",
+      ),
+    pitch_type: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Pitch surface, e.g. 'grass', '3G', 'astroturf'. Omit to keep the template default of 'grass'.",
+      ),
+    pitch_condition: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Pre-match pitch condition if known, e.g. 'wet', 'frozen'. Usually omitted — set post-match.",
+      ),
+    focus_area: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Pre-match focus area, e.g. 'using your eyes'. Fills the focus_area frontmatter field and the {{focus_area}} placeholder in the body.",
+      ),
+    importance: z
+      .enum(IMPORTANCE_VALUES)
+      .optional()
+      .describe(
+        "Match importance. One of: league, cup, cup-final, friendly, tournament. Omit to keep the template default of 'league'.",
+      ),
+    notes: z
+      .string()
+      .min(1)
+      .optional()
+      .describe(
+        "Free-form pre-match context (competition name, age group, venue notes) that doesn't fit a frontmatter field. Inserted under the body's '## Context' section.",
+      ),
+  },
+  run: runCreateMatch,
+};

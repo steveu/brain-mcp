@@ -4,9 +4,11 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadAllowlist } from "../src/allowlist.js";
 import { memoryAuditSink } from "../src/audit.js";
-import { runFetch, runGrep, runList } from "../src/vault-read.js";
+import { runFetch } from "../src/tools/fetch.js";
+import { runGrep } from "../src/tools/grep.js";
+import { runList } from "../src/tools/list.js";
 
-describe("vault-read audit sink", () => {
+describe("read tools audit sink", () => {
   let vault: string;
   let allowlistPath: string;
 
@@ -35,10 +37,11 @@ describe("vault-read audit sink", () => {
   it("records list/fetch/grep entries via the injected sink", () => {
     const allowlist = loadAllowlist(vault, allowlistPath);
     const audit = memoryAuditSink();
+    const deps = { allowlist: () => allowlist, audit };
 
-    runList({ allowlist, audit }, {});
-    runFetch({ allowlist, audit }, { path: "Notes/one.md" });
-    runGrep({ allowlist, audit }, { query: "hello" });
+    runList(deps, {});
+    runFetch(deps, { path: "Notes/one.md" });
+    runGrep(deps, { query: "hello" });
 
     expect(audit.entries.map((e) => e.tool)).toEqual(["list", "fetch", "grep"]);
 
