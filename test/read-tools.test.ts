@@ -80,21 +80,28 @@ describe("runFetch error paths", () => {
     expect(audit.entries).toEqual([]);
   });
 
-  it("throws when the file exists but is unreadable", () => {
-    // chmod 000 on a regular file: resolveInAllowlist still succeeds (existsSync
-    // + realpathSync don't need read), and statSync on it also succeeds — so the
-    // failure surfaces from the read() inside runFetch.
-    const target = path.join(vault, "Notes", "locked.md");
-    writeFileSync(target, "# Locked\n", "utf8");
-    chmodSync(target, 0o000);
-    unreadablePath = target;
+  // chmod 000 only blocks reads for non-root users on POSIX. Skip on Windows
+  // (no POSIX perms) and when running as root (perms ignored).
+  const canTestUnreadable =
+    process.platform !== "win32" &&
+    typeof process.getuid === "function" &&
+    process.getuid() !== 0;
 
-    const { deps } = buildDeps(vault, allowlistPath);
-    // On macOS / Linux when running as a non-root user, reading a 000 file
-    // throws EACCES from readFileSync. The error message is implementation
-    // defined, so we just assert that *some* error propagates.
-    expect(() => runFetch(deps, { path: "Notes/locked.md" })).toThrow();
-  });
+  it.skipIf(!canTestUnreadable)(
+    "throws when the file exists but is unreadable",
+    () => {
+      // resolveInAllowlist + statSync both succeed (no read needed), so the
+      // failure surfaces from the read() inside runFetch.
+      const target = path.join(vault, "Notes", "locked.md");
+      writeFileSync(target, "# Locked\n", "utf8");
+      chmodSync(target, 0o000);
+      unreadablePath = target;
+
+      const { deps } = buildDeps(vault, allowlistPath);
+      // EACCES message is implementation-defined; just assert *some* error.
+      expect(() => runFetch(deps, { path: "Notes/locked.md" })).toThrow();
+    },
+  );
 });
 
 describe("runGrep output caps and path scoping", () => {
