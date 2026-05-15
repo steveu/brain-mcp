@@ -1,7 +1,9 @@
-import express, { Router, type Response } from "express";
+import express, { Router, type Request, type Response } from "express";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import type { AppLogger } from "./logger.js";
+import { silentLogger } from "./logger.js";
 import {
   type AuthCode,
   type Client,
@@ -26,12 +28,14 @@ export type OAuthDeps = {
   resourceUrl: string;
   accessToken: string;
   storePath: string;
+  logger?: AppLogger;
 };
 
 export function createOAuthRouter(deps: OAuthDeps): Router {
   const router = Router();
   const issuer = deps.publicUrl.replace(/\/$/, "");
   const resource = deps.resourceUrl;
+  const logger = deps.logger ?? silentLogger();
 
   const clientStore = createFileClientStore(deps.storePath);
   const codeStore = createMemoryCodeStore();
@@ -111,6 +115,15 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
     const submitted = typeof req.body?.brain_token === "string" ? req.body.brain_token : "";
     const issued = issueCode(core, parsed.value, submitted);
     if (!issued.ok) {
+      logger.warn(
+        {
+          event: "auth_failure",
+          path: (req as Request).originalUrl ?? (req as Request).url,
+          source_ip: (req as Request).ip,
+          reason: "wrong_brain_token",
+        },
+        "auth failure",
+      );
       res
         .status(401)
         .type("text/html")
