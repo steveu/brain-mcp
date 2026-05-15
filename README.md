@@ -6,8 +6,8 @@ to Claude.ai (and other MCP clients), so that natural-language requests like
 disk without going through a GitHub round-trip.
 
 Designed for a single-user, self-hosted setup: one Mac mini, a vault at
-`~/brain/vault/`, and a Tailscale Funnel (or any HTTPS tunnel) putting the
-service in reach of Claude.ai's custom-connector flow.
+`~/brain/vault/`, and a Cloudflare Tunnel (or any HTTPS tunnel) putting
+the service in reach of Claude.ai's custom-connector flow.
 
 ## Tools
 
@@ -96,10 +96,11 @@ curl -s -X POST http://127.0.0.1:8765/mcp \
 
 ## Exposing to Claude.ai
 
-The server binds to `127.0.0.1` only — Funnel (or another tunnel) is the
-only public ingress. See [`docs/deploy.md`](./docs/deploy.md) for the
-one-time Tailscale Funnel + Claude.ai connector setup, including token
-rotation and the Cloudflare Tunnel alternative.
+The server binds to `127.0.0.1` only — a Cloudflare Tunnel (or another
+HTTPS tunnel) is the only public ingress. See
+[`docs/deploy.md`](./docs/deploy.md) for the one-time Cloudflare Tunnel
++ Claude.ai connector setup, token rotation, and the Tailscale Funnel
+footnote.
 
 ## Design notes
 
@@ -121,12 +122,12 @@ rotation and the Cloudflare Tunnel alternative.
 - **Static long-lived token is a deliberate deviation from current MCP
   spec direction.** The 2026 authorisation spec points at short-lived
   access tokens with refresh, ideally backed by a real authorisation
-  server (Auth0 / Stytch / WorkOS / Keycloak). For a single-user,
-  Tailscale-only deployment the practical risk is low and the cost of
-  adopting that model is high, so brain-mcp deliberately stays simple.
-  If this server ever exposes more than one user, gets reachable
-  outside the tailnet, or grows per-tool scopes, swap the static token
-  for a real AS before doing anything else.
+  server (Auth0 / Stytch / WorkOS / Keycloak). For a single-user
+  deployment behind one HTTPS tunnel, with the bearer token as the
+  sole gate, the practical risk is low and the cost of adopting that
+  model is high — so brain-mcp deliberately stays simple. If this
+  server ever exposes more than one user or grows per-tool scopes,
+  swap the static token for a real AS before doing anything else.
 - **Path safety:** all vault writes go through `resolveUnderVault(...)`
   in `src/vault-fs.ts`, which resolves and rejects anything outside
   `BRAIN_VAULT`. Read tools resolve through `resolveInAllowlist(...)`
