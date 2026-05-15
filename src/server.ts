@@ -124,9 +124,20 @@ export function createServer(config: ServerConfig): Express {
 
   const app = express();
 
-  // helmet() defaults are fine for the OAuth HTML pages — they self-contain
-  // their styles and load no third-party assets.
-  app.use(helmet());
+  // Helmet defaults set Cross-Origin-Resource-Policy: same-origin and
+  // Cross-Origin-Opener-Policy: same-origin. Those are right for a browser app
+  // serving user-uploaded content, but wrong for an OAuth provider: every
+  // endpoint here (.well-known discovery, /token, /authorize) must be
+  // reachable cross-origin from the client that's connecting (e.g. claude.ai).
+  // Relax both; keep HSTS, nosniff, X-Frame-Options, Referrer-Policy and the
+  // rest at their defaults.
+  app.use(
+    helmet({
+      crossOriginResourcePolicy: { policy: "cross-origin" },
+      crossOriginOpenerPolicy: false,
+      crossOriginEmbedderPolicy: false,
+    }),
+  );
 
   // One JSON line per HTTP request: method, path, status, duration, request id.
   // `req.id` is also exposed on the request object for downstream handlers.
