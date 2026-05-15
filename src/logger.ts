@@ -34,7 +34,7 @@ export type LoggerOptions = {
  */
 export function createAppLogger(options: LoggerOptions = {}): AppLogger {
   const filePath =
-    options.filePath ?? path.join(homedir(), "Library", "Logs", "brain-mcp.json");
+    options.filePath ?? path.join(homedir(), "data", "brain-mcp", "logs", "brain-mcp.json");
   const sizeMb = options.sizeMb ?? 5;
   const retain = options.retain ?? 5;
 

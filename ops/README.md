@@ -12,16 +12,18 @@ The token does **not** live in the plist. It lives in the repo-root `.env` (mode
 
 ## Logs
 
-- `~/Library/Logs/brain-mcp.json` — symlink that always points at the active rotated JSON log. This is the stable `tail -F` target.
-- `~/Library/Logs/brain-mcp.{N}.json` — rotated structured JSON log files (one line per HTTP request, plus tool-call and auth-failure entries). Rotated by `pino-roll` once a file exceeds ~5MB; up to 5 rotated files are kept (e.g. `brain-mcp.1.json`, `brain-mcp.2.json`).
-- `~/Library/Logs/current.log` — `pino-roll`'s own symlink to the active rotated file; the `brain-mcp.json` symlink above points at this one.
+Structured Node logs live under `~/data/brain-mcp/logs/` alongside the rest of the project's runtime state (`audit.log`, `oauth.json`). Launchd-managed stdout/stderr stays in `~/Library/Logs/` because launchd writes those itself.
+
+- `~/data/brain-mcp/logs/brain-mcp.json` — symlink that always points at the active rotated JSON log. This is the stable `tail -F` target. Override with `BRAIN_MCP_LOG_FILE`.
+- `~/data/brain-mcp/logs/brain-mcp.{N}.json` — rotated structured JSON log files (one line per HTTP request, plus tool-call and auth-failure entries). Rotated by `pino-roll` once a file exceeds ~5MB; up to 5 rotated files are kept (e.g. `brain-mcp.1.json`, `brain-mcp.2.json`).
+- `~/data/brain-mcp/logs/current.log` — `pino-roll`'s own symlink to the active rotated file; the `brain-mcp.json` symlink above points at this one.
 - `~/Library/Logs/brain-mcp.log` — script-level fallback (launcher banner, env-file errors, anything Node writes to stdout/stderr after `exec`).
 - `~/Library/Logs/brain-mcp.launchd.log` — launchd-level (process supervision, throttle messages).
 
 To tail the structured log:
 
 ```sh
-tail -F ~/Library/Logs/brain-mcp.json | jq .
+tail -F ~/data/brain-mcp/logs/brain-mcp.json | jq .
 ```
 
 ## Prerequisites

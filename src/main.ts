@@ -23,7 +23,7 @@ function readConfig(): { config: ServerConfig; port: number } {
     process.env.BRAIN_MCP_AUDIT_LOG ?? path.join(homedir(), "data", "brain-mcp", "audit.log");
   const logFilePath =
     process.env.BRAIN_MCP_LOG_FILE ??
-    path.join(homedir(), "Library", "Logs", "brain-mcp.json");
+    path.join(homedir(), "data", "brain-mcp", "logs", "brain-mcp.json");
 
   if (!token) {
     console.error("BRAIN_MCP_TOKEN is required");
