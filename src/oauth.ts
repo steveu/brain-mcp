@@ -118,7 +118,7 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
       logger.warn(
         {
           event: "auth_failure",
-          path: (req as Request).originalUrl ?? (req as Request).url,
+          path: pathOnly((req as Request).originalUrl ?? (req as Request).url),
           source_ip: (req as Request).ip,
           reason: "wrong_brain_token",
         },
@@ -145,7 +145,7 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
         logger.warn(
           {
             event: "auth_failure",
-            path: (req as Request).originalUrl ?? (req as Request).url,
+            path: pathOnly((req as Request).originalUrl ?? (req as Request).url),
             source_ip: (req as Request).ip,
             reason: `token_${result.error}`,
           },
@@ -191,6 +191,17 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
   }
 
   return router;
+}
+
+/**
+ * Strip a query string from a request URL — request URLs can carry secrets
+ * in query parameters (e.g. `?brain_token=...`, OAuth `code` values) that
+ * must never appear in structured logs.
+ */
+function pathOnly(url: string | undefined): string {
+  if (typeof url !== "string") return "";
+  const q = url.indexOf("?");
+  return q >= 0 ? url.slice(0, q) : url;
 }
 
 function parseBasicAuth(header: string | undefined): {

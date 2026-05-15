@@ -137,13 +137,19 @@ export function createServer(config: ServerConfig): Express {
       customSuccessMessage: () => "http request",
       customErrorMessage: () => "http request errored",
       // Redact again at the http-log layer to ensure no auth header leaks via
-      // `req.headers` even if upstream redact paths change.
+      // `req.headers` even if upstream redact paths change. Strip the query
+      // string from the logged path — request URLs can carry tokens
+      // (`?brain_token=...`, OAuth `code` values, etc.) and the issue
+      // requires we never log them.
       serializers: {
         req(req: Request & { id?: string | number }) {
+          const rawUrl = typeof req.url === "string" ? req.url : "";
+          const qIndex = rawUrl.indexOf("?");
+          const pathOnly = qIndex >= 0 ? rawUrl.slice(0, qIndex) : rawUrl;
           return {
             id: req.id,
             method: req.method,
-            url: req.url,
+            path: pathOnly,
             remoteAddress: req.ip,
           };
         },
@@ -173,7 +179,7 @@ export function createServer(config: ServerConfig): Express {
       logger.warn(
         {
           event: "auth_failure",
-          path: req.originalUrl ?? req.url,
+          path: pathOnly(req.originalUrl ?? req.url),
           source_ip: req.ip,
           reason,
         },
@@ -223,6 +229,17 @@ export function createServer(config: ServerConfig): Express {
   });
 
   return app;
+}
+
+/**
+ * Strip a query string from a request URL — request URLs can carry secrets
+ * in query parameters (e.g. `?brain_token=...`, OAuth `code` values), which
+ * the issue requires we never log.
+ */
+function pathOnly(url: string | undefined): string {
+  if (typeof url !== "string") return "";
+  const q = url.indexOf("?");
+  return q >= 0 ? url.slice(0, q) : url;
 }
 
 /**

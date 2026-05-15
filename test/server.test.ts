@@ -213,6 +213,29 @@ describe("createServer auth-failure logging", () => {
 
     await handle.close();
   });
+
+  it("never logs query-string values from the request URL", async () => {
+    const logger = capturingLogger(captured);
+    const app = createServer(makeConfig(vault, allowlistPath, logger));
+    const handle = await startEphemeral(app);
+
+    const querySecret = "do-not-log-this-query-param-ABCDEF";
+    // Any path with a query string is fine here; healthz is the simplest
+    // 200 path and still flows through pino-http.
+    const res = await fetch(`${handle.url}/healthz?brain_token=${querySecret}`);
+    expect(res.status).toBe(200);
+    await drain(res);
+
+    const serialised = JSON.stringify(captured);
+    expect(serialised).not.toContain(querySecret);
+    // And the http-request log line should record the path-only field.
+    const httpLines = captured.filter(
+      (line) => (line.req as { path?: string } | undefined)?.path === "/healthz",
+    );
+    expect(httpLines.length).toBeGreaterThan(0);
+
+    await handle.close();
+  });
 });
 
 describe("createServer tool-call logging", () => {
