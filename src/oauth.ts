@@ -102,7 +102,6 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
       replyAuthorizeError(res, req.query, parsed.error, parsed.error_description);
       return;
     }
-    setAuthorizeCsp(res, parsed.value.redirectUri);
     res.type("text/html").send(renderAuthorizePage(req.query));
   });
 
@@ -125,7 +124,6 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
         },
         "auth failure",
       );
-      setAuthorizeCsp(res, parsed.value.redirectUri);
       res
         .status(401)
         .type("text/html")
@@ -204,36 +202,6 @@ function pathOnly(url: string | undefined): string {
   if (typeof url !== "string") return "";
   const q = url.indexOf("?");
   return q >= 0 ? url.slice(0, q) : url;
-}
-
-// Helmet's default CSP sets `form-action 'self'`, which the browser enforces
-// across the whole submission chain — including our 302 to the OAuth client's
-// redirect_uri. Replace the policy on the consent page so the validated
-// redirect_uri's origin is allowed as a form-action destination. Everything
-// else mirrors helmet's defaults.
-function setAuthorizeCsp(res: Response, redirectUri: string): void {
-  let origin: string;
-  try {
-    origin = new URL(redirectUri).origin;
-  } catch {
-    return;
-  }
-  res.setHeader(
-    "Content-Security-Policy",
-    [
-      "default-src 'self'",
-      "base-uri 'self'",
-      "font-src 'self' https: data:",
-      `form-action 'self' ${origin}`,
-      "frame-ancestors 'self'",
-      "img-src 'self' data:",
-      "object-src 'none'",
-      "script-src 'self'",
-      "script-src-attr 'none'",
-      "style-src 'self' https: 'unsafe-inline'",
-      "upgrade-insecure-requests",
-    ].join("; "),
-  );
 }
 
 function parseBasicAuth(header: string | undefined): {

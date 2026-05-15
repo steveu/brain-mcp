@@ -1,5 +1,4 @@
 import express from "express";
-import helmet from "helmet";
 import type { AddressInfo } from "node:net";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -163,69 +162,3 @@ describe("OAuth router /token auth-failure logging", () => {
   });
 });
 
-describe("OAuth router /authorize CSP form-action override", () => {
-  let storeDir: string;
-  let storePath: string;
-
-  beforeEach(() => {
-    storeDir = mkdtempSync(path.join(tmpdir(), "brain-mcp-oauth-csp-"));
-    storePath = path.join(storeDir, "oauth.json");
-  });
-
-  afterEach(() => {
-    rmSync(storeDir, { recursive: true, force: true });
-  });
-
-  it("relaxes form-action on the consent page so the validated redirect_uri origin is allowed", async () => {
-    const app = express();
-    app.use(helmet());
-    app.use(express.json({ limit: "1mb" }));
-    app.use(
-      createOAuthRouter({
-        publicUrl: "https://brain.example.test",
-        resourceUrl: "https://brain.example.test/mcp",
-        accessToken: "static-token",
-        storePath,
-      }),
-    );
-
-    const server = app.listen(0, "127.0.0.1");
-    await new Promise<void>((r) => server.once("listening", r));
-    const { port } = server.address() as AddressInfo;
-    const base = `http://127.0.0.1:${port}`;
-
-    const redirectUri = "https://claude.ai/api/mcp/auth_callback";
-    const registerRes = await fetch(`${base}/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_name: "csp-test",
-        redirect_uris: [redirectUri],
-      }),
-    });
-    expect(registerRes.status).toBe(201);
-    const registered = (await registerRes.json()) as { client_id: string };
-
-    const verifier = randomBytes(32).toString("base64url");
-    const challenge = s256(verifier);
-    const params = new URLSearchParams({
-      response_type: "code",
-      client_id: registered.client_id,
-      redirect_uri: redirectUri,
-      state: "xyz",
-      code_challenge: challenge,
-      code_challenge_method: "S256",
-    });
-    const authorizeRes = await fetch(`${base}/authorize?${params.toString()}`);
-    expect(authorizeRes.status).toBe(200);
-    await drain(authorizeRes);
-
-    const csp = authorizeRes.headers.get("content-security-policy") ?? "";
-    expect(csp).toContain("form-action 'self' https://claude.ai");
-    expect(csp).not.toMatch(/form-action 'self';/);
-
-    await new Promise<void>((res, rej) =>
-      server.close((err) => (err ? rej(err) : res())),
-    );
-  });
-});

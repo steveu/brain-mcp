@@ -3,7 +3,6 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import cors from "cors";
 import express, { type Request, type Response, type NextFunction, type Express } from "express";
 import { accessSync, constants as fsConstants } from "node:fs";
-import helmet from "helmet";
 import { pinoHttp } from "pino-http";
 import { loadAllowlist } from "./allowlist.js";
 import type { AuditSink } from "./audit.js";
@@ -125,28 +124,13 @@ export function createServer(config: ServerConfig): Express {
 
   const app = express();
 
-  // CORS: the OAuth client (e.g. claude.ai) now does browser-side discovery
-  // and preflighted requests against /token from its connector UI. Mount cors
-  // before helmet so OPTIONS preflights short-circuit with the Allow-* headers
-  // intact. OAuth discovery is meant to be publicly reachable, and the MCP
-  // and token endpoints are protected by the bearer token / authorization
-  // code, not by origin, so reflecting any origin is fine here.
+  // CORS: claude.ai's connector UI does browser-side discovery and a CORS
+  // preflight against /token before initiating the user flow. Reflect the
+  // request origin so preflights succeed. OAuth discovery is meant to be
+  // publicly reachable, and the MCP and token endpoints are protected by
+  // the bearer token / authorization code, not by origin, so reflecting any
+  // origin is fine here.
   app.use(cors({ origin: true, credentials: false }));
-
-  // Helmet defaults set Cross-Origin-Resource-Policy: same-origin and
-  // Cross-Origin-Opener-Policy: same-origin. Those are right for a browser app
-  // serving user-uploaded content, but wrong for an OAuth provider: every
-  // endpoint here (.well-known discovery, /token, /authorize) must be
-  // reachable cross-origin from the client that's connecting (e.g. claude.ai).
-  // Relax both; keep HSTS, nosniff, X-Frame-Options, Referrer-Policy and the
-  // rest at their defaults.
-  app.use(
-    helmet({
-      crossOriginResourcePolicy: { policy: "cross-origin" },
-      crossOriginOpenerPolicy: false,
-      crossOriginEmbedderPolicy: false,
-    }),
-  );
 
   // One JSON line per HTTP request: method, path, status, duration, request id.
   // `req.id` is also exposed on the request object for downstream handlers.
