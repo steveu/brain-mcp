@@ -54,7 +54,12 @@ export function createAppLogger(options: LoggerOptions = {}): AppLogger {
       // `current.log` (sibling symlink kept fresh by pino-roll on every
       // rotation) is what we point our user-facing symlink at.
       symlink: true,
-      limit: { count: retain },
+      // `removeOtherLogFiles: true` makes the retention count apply across
+      // process restarts. Without it, pino-roll only counts files it
+      // created itself in the current run, so leftover rotated files from a
+      // previous process linger forever and the log directory grows
+      // unbounded across launchd restarts.
+      limit: { count: retain, removeOtherLogFiles: true },
     },
   });
 
