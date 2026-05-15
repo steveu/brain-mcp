@@ -46,13 +46,15 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
 
   const formBody = express.urlencoded({ extended: false });
 
-  router.get("/.well-known/oauth-protected-resource", (_req, res) => {
+  const resourceMetadataHandler = (_req: express.Request, res: express.Response) => {
     res.json({
       resource,
       authorization_servers: [issuer],
       bearer_methods_supported: ["header"],
     });
-  });
+  };
+  router.get("/.well-known/oauth-protected-resource", resourceMetadataHandler);
+  router.get("/.well-known/oauth-protected-resource/mcp", resourceMetadataHandler);
 
   router.get("/.well-known/oauth-authorization-server", (_req, res) => {
     res.json({
