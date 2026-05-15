@@ -5,94 +5,134 @@ from a Claude.ai chat". Assumes the server is already running locally — see
 [README — Run locally](../README.md#run-locally) for that — and that the
 launchd job in [`ops/README.md`](../ops/README.md) is the supervisor.
 
-> **Status (2026-05-07).** All three steps work today. brain-mcp now
-> serves OAuth metadata, DCR, and a token-gated `/authorize` page
-> alongside the bearer-protected `/mcp` endpoint, so the Claude.ai
-> custom-connector UI can register against it. Bearer auth on `/mcp`
-> is unchanged for clients that can send custom headers (Claude Code,
-> the Claude API's `mcp_servers` field, raw `curl`).
+> **Status (2026-05-15).** Public ingress is a Cloudflare Tunnel fronting
+> `brain.urmston.org`. brain-mcp serves OAuth metadata, DCR, and a
+> token-gated `/authorize` page alongside the bearer-protected `/mcp`
+> endpoint, so the Claude.ai custom-connector UI can register against
+> it. Bearer auth on `/mcp` is unchanged for clients that can send
+> custom headers (Claude Code, the Claude API's `mcp_servers` field,
+> raw `curl`). The previous edge was Tailscale Funnel; the move is
+> recorded in the footnote at the bottom.
 
 The shape:
 
 ```
-Claude.ai  →  https://<host>.<tailnet>.ts.net  →  Tailscale Funnel  →  127.0.0.1:8765
+Claude.ai  →  https://brain.urmston.org  →  cloudflared (outbound)  →  127.0.0.1:8765
 ```
 
-The server binds to `127.0.0.1` only (see `src/main.ts`) — the tunnel is
-the only public ingress. If Funnel ever drops, the service goes dark rather
-than fails open on `0.0.0.0`. Defence in depth.
+The server binds to `127.0.0.1` only (see `src/main.ts`) — `cloudflared`
+holds an outbound connection to Cloudflare, so there are no inbound
+ports or port forwarding to manage. If the tunnel ever drops, the
+service goes dark rather than fails open on `0.0.0.0`. Defence in
+depth.
 
-## 1. Enable Funnel on the tailnet
+## How `cloudflared` is wired up on the mini
 
-Funnel is gated by a node attribute in the tailnet policy. In the
-[Tailscale admin console](https://login.tailscale.com/admin/acls/file),
-add `funnel` to the `nodeAttrs` block (existing entries kept):
+`cloudflared` runs as a single user launch agent
+(`~/Library/LaunchAgents/com.steveu.edge.cloudflared.plist`) supervising
+one tunnel — `mac-mini-edge` — whose config lives at
+`~/code/edge/cloudflared/config.yml`. Adding a new public hostname
+means adding an `ingress:` rule there, not creating a second tunnel.
+Today the config fans out to both `pitchside.urmston.org` and
+`brain.urmston.org`:
 
-```json
-{
-  "nodeAttrs": [
-    { "target": ["autogroup:member"], "attr": ["funnel"] }
-  ]
-}
+```yaml
+tunnel: <mac-mini-edge-uuid>
+credentials-file: /Users/steveu/code/edge/cloudflared/<uuid>.json
+
+ingress:
+  - hostname: pitchside.urmston.org
+    service: http://localhost:8080
+  - hostname: brain.urmston.org
+    service: http://127.0.0.1:8765
+  - service: http_status:404
 ```
 
-Save. MagicDNS must also be enabled (admin console → DNS → MagicDNS).
+The trailing catch-all is required by `cloudflared`. Anything that
+doesn't match a hostname rule gets a 404 rather than reaching a local
+service.
 
-## 2. Start Funnel on the Mac mini
+## 1. Add the hostname to the tunnel
+
+From the mini, with `cloudflared` already authenticated against the
+Cloudflare account that owns `urmston.org`:
 
 ```sh
-tailscale funnel --bg 8765
+cloudflared tunnel route dns mac-mini-edge brain.urmston.org
 ```
 
-The `--bg` flag persists the configuration across reboots and across
-`tailscaled` restarts — no extra launchd job needed. Funnel always listens
-publicly on 443; the `8765` arg is the local port it forwards to.
+That writes the `CNAME` for `brain.urmston.org` pointing at the
+`mac-mini-edge` tunnel. Proxied through Cloudflare, so TLS terminates
+at the edge.
 
-Verify:
+## 2. Add the ingress rule
+
+Edit `~/code/edge/cloudflared/config.yml` to add the `brain.urmston.org`
+entry above. Validate before reloading:
 
 ```sh
-tailscale funnel status
-curl -s https://$(tailscale status --json | jq -r '.Self.DNSName' | sed 's/\.$//')/healthz
+cloudflared tunnel --config ~/code/edge/cloudflared/config.yml ingress validate
 ```
 
-The `/healthz` response should be `{"ok":true,"vault":"..."}`. The hostname
-is your Mac mini's MagicDNS name, e.g. `mini.tailnet-name.ts.net`.
-
-To stop:
+Reload the launch agent so the new rule is live:
 
 ```sh
-tailscale funnel --bg off
+launchctl kickstart -k gui/$(id -u)/com.steveu.edge.cloudflared
 ```
 
-## 3. Register the connector in Claude.ai
+`cloudflared tunnel info mac-mini-edge` should show four active edge
+connections within a few seconds.
 
-Set `BRAIN_MCP_PUBLIC_URL` in the repo-root `.env` to the same
-hostname Funnel exposes (no trailing slash, scheme included), e.g.
-`https://mini.tail-xxxx.ts.net`. Restart the launchd job so the OAuth
-endpoints come up:
+## 3. Point brain-mcp at the new public URL
+
+Set `BRAIN_MCP_PUBLIC_URL` in the repo-root `.env` (no trailing slash,
+scheme included):
+
+```
+BRAIN_MCP_PUBLIC_URL=https://brain.urmston.org
+```
+
+Restart the brain-mcp launchd job so the OAuth endpoints come up bound
+to the new host:
 
 ```sh
 launchctl kickstart -k gui/$(id -u)/st.urm.brain-mcp
 ```
 
-Smoke-test the metadata endpoints:
+Smoke-test the public surface:
 
 ```sh
-curl -s https://mini.tail-xxxx.ts.net/.well-known/oauth-protected-resource
-curl -s https://mini.tail-xxxx.ts.net/.well-known/oauth-authorization-server
+curl -s https://brain.urmston.org/healthz
+curl -s https://brain.urmston.org/.well-known/oauth-protected-resource/mcp
+curl -s https://brain.urmston.org/.well-known/oauth-authorization-server
 ```
 
-Both should return JSON. Then in Claude.ai:
+All three should return JSON. The `issuer` / `resource` fields should
+reflect `brain.urmston.org`. `/healthz` is unauthenticated
+(`src/server.ts:198`), so it doubles as the probe target for an
+external uptime monitor (UptimeRobot or similar) — point one at it
+the day of cutover for a clean baseline.
 
-1. **Settings → Connectors → Add custom connector.**
-2. **Name:** `brain` (or whatever; it's only the chat-UI label).
-3. **URL:** `https://<host>.<tailnet>.ts.net/mcp`. Claude.ai discovers
-   the authorization server via `WWW-Authenticate` on the first 401 and
+## 4. Register the connector in Claude.ai
+
+If you're migrating from a previous host, delete
+`~/data/brain-mcp/oauth.json` first so DCR re-registers cleanly — the
+old `client_id` was issued against the previous host and Claude.ai
+rejects it once the issuer changes.
+
+Then in Claude.ai:
+
+1. **Settings → Connectors.** Remove the old `brain` connector if one
+   exists.
+2. **Add custom connector.**
+3. **Name:** `brain` (or whatever; it's only the chat-UI label).
+4. **URL:** `https://brain.urmston.org/mcp`. Claude.ai discovers the
+   authorization server via `WWW-Authenticate` on the first 401 and
    the protected-resource metadata document.
-4. **OAuth:** leave the **client ID** and **client secret** fields blank.
+5. **OAuth:** leave the **client ID** and **client secret** fields blank.
    brain-mcp supports Dynamic Client Registration, so Claude.ai will
    register itself at `/register` and persist the issued credentials.
-5. Save. Claude.ai opens a tab pointed at `/authorize`. Paste your
+6. Save. Claude.ai opens a tab pointed at `/authorize`. Paste your
    `BRAIN_MCP_TOKEN` into the form on that page and submit — the page
    redirects back to Claude.ai with the auth code, which Claude.ai
    exchanges at `/token`. The connector then calls `tools/list` and
@@ -110,7 +150,7 @@ keep using the bearer token directly:
   field.
 - **Raw HTTP** — see the `curl` smoke tests in the README.
 
-## 4. Smoke test from Claude.ai
+## 5. Smoke test from Claude.ai
 
 In a Claude.ai chat with the connector enabled:
 
@@ -121,8 +161,9 @@ line. If it didn't land, in order of likelihood:
 
 - Connector auth header wrong → `curl` the URL with `-H "Authorization:
   Bearer ..."` and see what the server returns.
-- Funnel not running → `tailscale funnel status` should show port 443
-  forwarding to `127.0.0.1:8765`.
+- Tunnel not running → `cloudflared tunnel info mac-mini-edge` should
+  show active connections; `launchctl list | grep cloudflared` should
+  show the agent loaded.
 - Server not running → `curl http://127.0.0.1:8765/healthz` on the Mac
   mini; if that fails, see [`ops/README.md`](../ops/README.md) for
   launchd debugging.
@@ -143,26 +184,27 @@ launchctl kickstart -k gui/$(id -u)/st.urm.brain-mcp       # 3. restart server
 Between steps 3 and 4 the connector will 401. That's the point — old
 tokens stop working immediately.
 
-## Cloudflare Tunnel (alternative)
+## Footnote — previous edge: Tailscale Funnel
 
-If Tailscale Funnel doesn't fit (e.g. you want a custom domain rather than
-`*.ts.net`), Cloudflare Tunnel covers the same shape: long-lived
-authenticated tunnel from the Mac mini outbound to Cloudflare, public
-HTTPS hostname on a domain you control.
+The original edge for brain-mcp was Tailscale Funnel at
+`https://mini-steve.tail1b6462.ts.net/mcp`. Funnel is one command and
+zero new accounts, so it was the right choice to get the service
+callable from Claude.ai for the first time. The service went down twice
+on 2026-05-15 from the perspective of both Claude Code and Claude.ai
+while the local node process on `127.0.0.1:8765` was demonstrably
+healthy throughout (uptime > 4h, sub-2ms response to authed probes) —
+which ruled out brain-mcp itself; the failure was somewhere in the
+Funnel / Claude.ai-edge path. Diagnosis is correlational, not proven —
+the move to Cloudflare addresses all plausible failure modes (Funnel
+itself, the Funnel↔Claude.ai hop, Claude.ai's edge being squeamish
+about `*.ts.net` hostnames) equally.
 
-Sketch, not a full recipe:
+To bring Funnel back as a fallback:
 
 ```sh
-brew install cloudflared
-cloudflared tunnel login                                   # browser auth
-cloudflared tunnel create brain-mcp
-cloudflared tunnel route dns brain-mcp brain.example.com
-cloudflared tunnel run --url http://127.0.0.1:8765 brain-mcp
+tailscale funnel --bg 8765
 ```
 
-For persistence, `cloudflared service install` registers a launchd job.
-The Claude.ai connector setup (step 3 above) is identical — the only
-difference is the URL.
-
-Pick Cloudflare Tunnel if the domain matters; otherwise Tailscale Funnel
-is one command and zero new accounts.
+And set `BRAIN_MCP_PUBLIC_URL` to the resulting `*.ts.net` hostname.
+Tear down with `tailscale funnel reset`. `tailscaled` itself stays
+running regardless — it's still the path for admin SSH.

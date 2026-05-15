@@ -172,7 +172,7 @@ export function createServer(config: ServerConfig): Express {
       if (publicUrl) {
         res.setHeader(
           "WWW-Authenticate",
-          `Bearer realm="brain-mcp", resource_metadata="${publicUrl}/.well-known/oauth-protected-resource"`,
+          `Bearer realm="brain-mcp", resource_metadata="${publicUrl}/.well-known/oauth-protected-resource/mcp"`,
         );
       }
       const reason = !auth
