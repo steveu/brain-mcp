@@ -1,7 +1,9 @@
-import express, { Router, type Response } from "express";
+import express, { Router, type Request, type Response } from "express";
 import { randomBytes } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
+import type { AppLogger } from "./logger.js";
+import { silentLogger } from "./logger.js";
 import {
   type AuthCode,
   type Client,
@@ -26,12 +28,14 @@ export type OAuthDeps = {
   resourceUrl: string;
   accessToken: string;
   storePath: string;
+  logger?: AppLogger;
 };
 
 export function createOAuthRouter(deps: OAuthDeps): Router {
   const router = Router();
   const issuer = deps.publicUrl.replace(/\/$/, "");
   const resource = deps.resourceUrl;
+  const logger = deps.logger ?? silentLogger();
 
   const clientStore = createFileClientStore(deps.storePath);
   const codeStore = createMemoryCodeStore();
@@ -111,6 +115,15 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
     const submitted = typeof req.body?.brain_token === "string" ? req.body.brain_token : "";
     const issued = issueCode(core, parsed.value, submitted);
     if (!issued.ok) {
+      logger.warn(
+        {
+          event: "auth_failure",
+          path: pathOnly((req as Request).originalUrl ?? (req as Request).url),
+          source_ip: (req as Request).ip,
+          reason: "wrong_brain_token",
+        },
+        "auth failure",
+      );
       res
         .status(401)
         .type("text/html")
@@ -128,6 +141,17 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
     const merged: Record<string, unknown> = { ...(req.body ?? {}), ...basic };
     const result = exchangeCode(core, merged);
     if (!result.ok) {
+      if (result.status === 401) {
+        logger.warn(
+          {
+            event: "auth_failure",
+            path: pathOnly((req as Request).originalUrl ?? (req as Request).url),
+            source_ip: (req as Request).ip,
+            reason: `token_${result.error}`,
+          },
+          "auth failure",
+        );
+      }
       const payload: Record<string, string> = { error: result.error };
       if (result.error_description) payload.error_description = result.error_description;
       res.status(result.status).json(payload);
@@ -167,6 +191,17 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
   }
 
   return router;
+}
+
+/**
+ * Strip a query string from a request URL — request URLs can carry secrets
+ * in query parameters (e.g. `?brain_token=...`, OAuth `code` values) that
+ * must never appear in structured logs.
+ */
+function pathOnly(url: string | undefined): string {
+  if (typeof url !== "string") return "";
+  const q = url.indexOf("?");
+  return q >= 0 ? url.slice(0, q) : url;
 }
 
 function parseBasicAuth(header: string | undefined): {
