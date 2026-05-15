@@ -29,6 +29,12 @@ export type LoggerOptions = {
  * request object verbatim.
  */
 export function createAppLogger(options: LoggerOptions = {}): AppLogger {
+  // Caller passes the conceptual base path (e.g. `~/Library/Logs/brain-mcp.json`);
+  // pino-roll strips the last extension from `file` and re-appends it after the
+  // rotation number, so the actual files on disk are e.g.
+  // `~/Library/Logs/brain-mcp.1.json`, `brain-mcp.2.json`, ...
+  // `current.log` (a sibling symlink, kept up to date by pino-roll) always
+  // points at the active file — that is the stable path for `tail -F`.
   const filePath =
     options.filePath ?? path.join(homedir(), "Library", "Logs", "brain-mcp.json");
   const sizeMb = options.sizeMb ?? 5;
@@ -40,6 +46,7 @@ export function createAppLogger(options: LoggerOptions = {}): AppLogger {
       file: filePath,
       size: `${sizeMb}m`,
       mkdir: true,
+      symlink: true,
       limit: { count: retain },
     },
   });

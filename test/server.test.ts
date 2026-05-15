@@ -72,6 +72,19 @@ function startEphemeral(app: ReturnType<typeof createServer>): Promise<{
   });
 }
 
+/**
+ * Consume a fetch response fully so the underlying socket can be released
+ * before we tear the server down. Without this, body-having responses leave
+ * sockets in CLOSE_WAIT and `server.close()` hangs.
+ */
+async function drain(res: Response): Promise<void> {
+  try {
+    await res.arrayBuffer();
+  } catch {
+    /* response may already be aborted */
+  }
+}
+
 describe("createServer health probes", () => {
   let vault: string;
   let allowlistPath: string;
@@ -101,10 +114,12 @@ describe("createServer health probes", () => {
 
     const okBefore = await fetch(`${handle.url}/healthz`);
     expect(okBefore.status).toBe(200);
+    await drain(okBefore);
 
     chmodSync(vault, 0o500);
     const okAfter = await fetch(`${handle.url}/healthz`);
     expect(okAfter.status).toBe(200);
+    await drain(okAfter);
 
     await handle.close();
   });
@@ -162,6 +177,7 @@ describe("createServer auth-failure logging", () => {
     });
 
     expect(res.status).toBe(401);
+    await drain(res);
 
     const authFailures = captured.filter((line) => line.event === "auth_failure");
     expect(authFailures).toHaveLength(1);
@@ -190,6 +206,7 @@ describe("createServer auth-failure logging", () => {
     });
 
     expect(res.status).toBe(401);
+    await drain(res);
     const authFailures = captured.filter((line) => line.event === "auth_failure");
     expect(authFailures).toHaveLength(1);
     expect(authFailures[0]!.reason).toBe("missing_bearer");
@@ -214,7 +231,7 @@ describe("createServer tool-call logging", () => {
     rmSync(vault, { recursive: true, force: true });
   });
 
-  it("tool-call summary for capture records thought_length and never the body", async () => {
+  it("never embeds the full thought body in any captured log line", async () => {
     const logger = capturingLogger(captured);
     const app = createServer(makeConfig(vault, allowlistPath, logger));
     const handle = await startEphemeral(app);
@@ -226,14 +243,7 @@ describe("createServer tool-call logging", () => {
       method: "tools/call",
       params: { name: "capture", arguments: { thought: secret } },
     };
-    // We bypass MCP framing: POST returns 406 without the right Accept header
-    // on the streaming transport, but the framework still rejects before our
-    // tool handler runs. For our assertion we don't care about the response —
-    // we instead drive the tool directly via the registered handler by hitting
-    // an HTTP path that exercises the same logging wrapper.
-    //
-    // Simplest reliable signal: confirm the summariser never embeds the body
-    // even if the handler does run (or doesn't).
+
     const res = await fetch(`${handle.url}/mcp`, {
       method: "POST",
       headers: {
@@ -244,9 +254,11 @@ describe("createServer tool-call logging", () => {
       body: JSON.stringify(body),
     });
 
-    // Whether or not the MCP transport accepts the call, no log line should
-    // contain the secret.
+    // Whether or not the MCP transport accepts this exact framing, the
+    // sanitisation invariant must still hold for any tool-call log lines
+    // that did fire.
     expect(res.status).toBeGreaterThanOrEqual(200);
+    await drain(res);
     const serialised = JSON.stringify(captured);
     expect(serialised).not.toContain(secret);
 

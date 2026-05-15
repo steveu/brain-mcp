@@ -141,6 +141,17 @@ export function createOAuthRouter(deps: OAuthDeps): Router {
     const merged: Record<string, unknown> = { ...(req.body ?? {}), ...basic };
     const result = exchangeCode(core, merged);
     if (!result.ok) {
+      if (result.status === 401) {
+        logger.warn(
+          {
+            event: "auth_failure",
+            path: (req as Request).originalUrl ?? (req as Request).url,
+            source_ip: (req as Request).ip,
+            reason: `token_${result.error}`,
+          },
+          "auth failure",
+        );
+      }
       const payload: Record<string, string> = { error: result.error };
       if (result.error_description) payload.error_description = result.error_description;
       res.status(result.status).json(payload);

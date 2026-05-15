@@ -12,14 +12,15 @@ The token does **not** live in the plist. It lives in the repo-root `.env` (mode
 
 ## Logs
 
-- `~/Library/Logs/brain-mcp.json` — structured per-request JSON log (one line per HTTP request, plus tool-call and auth-failure entries). Rotated by `pino-roll` once a file exceeds ~5MB; up to 5 rotated files are kept alongside the active one (e.g. `brain-mcp.1.json`, `brain-mcp.2.json`).
+- `~/Library/Logs/brain-mcp.{N}.json` — structured per-request JSON log (one line per HTTP request, plus tool-call and auth-failure entries). Rotated by `pino-roll` once a file exceeds ~5MB; up to 5 rotated files are kept alongside the active one (e.g. `brain-mcp.1.json`, `brain-mcp.2.json`).
+- `~/Library/Logs/current.log` — symlink that always points at the active rotated JSON file. Use this for `tail -F`.
 - `~/Library/Logs/brain-mcp.log` — script-level fallback (launcher banner, env-file errors, anything Node writes to stdout/stderr after `exec`).
 - `~/Library/Logs/brain-mcp.launchd.log` — launchd-level (process supervision, throttle messages).
 
 To tail the structured log:
 
 ```sh
-tail -F ~/Library/Logs/brain-mcp.json | jq .
+tail -F ~/Library/Logs/current.log | jq .
 ```
 
 ## Prerequisites
