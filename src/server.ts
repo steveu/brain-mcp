@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
+import cors from "cors";
 import express, { type Request, type Response, type NextFunction, type Express } from "express";
 import { accessSync, constants as fsConstants } from "node:fs";
 import helmet from "helmet";
@@ -123,6 +124,14 @@ export function createServer(config: ServerConfig): Express {
   }
 
   const app = express();
+
+  // CORS: the OAuth client (e.g. claude.ai) now does browser-side discovery
+  // and preflighted requests against /token from its connector UI. Mount cors
+  // before helmet so OPTIONS preflights short-circuit with the Allow-* headers
+  // intact. OAuth discovery is meant to be publicly reachable, and the MCP
+  // and token endpoints are protected by the bearer token / authorization
+  // code, not by origin, so reflecting any origin is fine here.
+  app.use(cors({ origin: true, credentials: false }));
 
   // Helmet defaults set Cross-Origin-Resource-Policy: same-origin and
   // Cross-Origin-Opener-Policy: same-origin. Those are right for a browser app

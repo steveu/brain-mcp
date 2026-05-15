@@ -22,7 +22,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.18.0",
+    "@types/cors": "^2.8.19",
     "close-with-grace": "^2.5.0",
+    "cors": "^2.8.6",
     "express": "^5.0.0",
     "helmet": "^8.1.0",
     "pino": "^10.3.1",
