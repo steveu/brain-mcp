@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { lstatSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -52,6 +52,21 @@ describe("createAppLogger", () => {
     expect(parsed.nested).toEqual({ ok: true });
     expect(written).not.toContain("super-secret-token-value");
     expect(written).not.toContain("another-secret");
+  });
+
+  it("creates a user-facing symlink at filePath pointing at current.log", async () => {
+    const filePath = path.join(dir, "out.json");
+    const logger = createAppLogger({ filePath });
+
+    logger.info({ event: "warmup" }, "warmup");
+    await new Promise<void>((resolve) => logger.flush(() => resolve()));
+    await new Promise((r) => setTimeout(r, 300));
+
+    // The user-facing path is a symlink pointing at the relative `current.log`
+    // sibling, which pino-roll itself keeps fresh.
+    const stat = lstatSync(filePath);
+    expect(stat.isSymbolicLink()).toBe(true);
+    expect(readlinkSync(filePath)).toBe("current.log");
   });
 });
 

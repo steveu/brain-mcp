@@ -1,3 +1,4 @@
+import { lstatSync, mkdirSync, symlinkSync, unlinkSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import pino, { type Logger } from "pino";
@@ -6,8 +7,11 @@ export type AppLogger = Logger;
 
 export type LoggerOptions = {
   /**
-   * Absolute path of the rotating JSON log file. The parent directory is
-   * created on first write.
+   * User-facing path of the rotating JSON log file. The parent directory is
+   * created on first write. pino-roll names rotated files with the rotation
+   * number before the extension (e.g. `brain-mcp.1.json`), so we additionally
+   * maintain a stable symlink at this exact `filePath` pointing at the
+   * currently-active rotated file via pino-roll's `current.log` symlink.
    */
   filePath?: string;
   /**
@@ -29,16 +33,17 @@ export type LoggerOptions = {
  * request object verbatim.
  */
 export function createAppLogger(options: LoggerOptions = {}): AppLogger {
-  // Caller passes the conceptual base path (e.g. `~/Library/Logs/brain-mcp.json`);
-  // pino-roll strips the last extension from `file` and re-appends it after the
-  // rotation number, so the actual files on disk are e.g.
-  // `~/Library/Logs/brain-mcp.1.json`, `brain-mcp.2.json`, ...
-  // `current.log` (a sibling symlink, kept up to date by pino-roll) always
-  // points at the active file — that is the stable path for `tail -F`.
   const filePath =
     options.filePath ?? path.join(homedir(), "Library", "Logs", "brain-mcp.json");
   const sizeMb = options.sizeMb ?? 5;
   const retain = options.retain ?? 5;
+
+  // Ensure the parent directory exists synchronously so we can create the
+  // user-facing symlink immediately (pino-roll itself also handles `mkdir`
+  // for its own write target, but the symlink call below needs the directory
+  // to exist now).
+  const logDir = path.dirname(filePath);
+  mkdirSync(logDir, { recursive: true });
 
   const transport = pino.transport({
     target: "pino-roll",
@@ -46,10 +51,36 @@ export function createAppLogger(options: LoggerOptions = {}): AppLogger {
       file: filePath,
       size: `${sizeMb}m`,
       mkdir: true,
+      // `current.log` (sibling symlink kept fresh by pino-roll on every
+      // rotation) is what we point our user-facing symlink at.
       symlink: true,
       limit: { count: retain },
     },
   });
+
+  // Maintain a stable user-facing symlink at the configured `filePath` so
+  // `tail -F` against the documented path always reads the active rotated
+  // file. The symlink target is the sibling `current.log` (relative, so the
+  // link survives directory moves); pino-roll re-points `current.log` on
+  // each rotation, which transitively flows through to our symlink.
+  if (path.basename(filePath) !== "current.log") {
+    try {
+      try {
+        const existing = lstatSync(filePath);
+        if (existing.isSymbolicLink() || existing.isFile()) {
+          unlinkSync(filePath);
+        }
+      } catch (err) {
+        // ENOENT is fine — no prior file at this path.
+        if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+      }
+      symlinkSync("current.log", filePath);
+    } catch {
+      // A symlink failure (e.g. read-only mount, permissions) must not take
+      // down the server; the rotated files and `current.log` are still
+      // written.
+    }
+  }
 
   return pino(
     {
