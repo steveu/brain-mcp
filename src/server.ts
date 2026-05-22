@@ -51,7 +51,7 @@ export function createServer(config: ServerConfig): Express {
       async (args) => {
         const started = Date.now();
         try {
-          const text = tool.run({ vault }, args);
+          const text = await tool.run({ vault }, args);
           logger.info(
             {
               event: "tool_call",
@@ -92,7 +92,7 @@ export function createServer(config: ServerConfig): Express {
       async (args) => {
         const started = Date.now();
         try {
-          const text = tool.run({ allowlist: readAllowlistOrThrow, audit }, args);
+          const text = await tool.run({ allowlist: readAllowlistOrThrow, audit }, args);
           logger.info(
             {
               event: "tool_call",
@@ -273,6 +273,23 @@ function summariseToolArgs(toolName: string, args: unknown): Record<string, unkn
       summary[k] = typeof v === "string" ? `len:${v.length}` : typeof v;
     }
     return summary;
+  }
+  if (toolName === "walk_route") {
+    const a = args as Record<string, unknown>;
+    return {
+      name: typeof a?.name === "string" ? a.name : undefined,
+      waypoints_length: typeof a?.waypoints === "string" ? a.waypoints.length : 0,
+      pins_length: typeof a?.pins === "string" ? a.pins.length : 0,
+      profile: typeof a?.profile === "string" ? a.profile : undefined,
+      basemap: typeof a?.basemap === "string" ? a.basemap : undefined,
+    };
+  }
+  if (toolName === "save_route") {
+    const a = args as Record<string, unknown>;
+    return {
+      id: typeof a?.id === "string" ? a.id : undefined,
+      filename: typeof a?.filename === "string" ? a.filename : undefined,
+    };
   }
   // Read tools — surface only top-level argument keys, never values.
   if (args && typeof args === "object") {

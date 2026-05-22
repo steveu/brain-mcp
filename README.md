@@ -30,6 +30,17 @@ the service in reach of Claude.ai's custom-connector flow.
   the match; the 11 event-tally keys (`passes_completed`, `goals`, …)
   default to `0` and are written by [pitchside](https://github.com/steveu/pitchside)
   during the match — `create_match` itself never touches them.
+- `walk_route(waypoints: string, name: string, pins?, profile?, basemap?)` —
+  build a walking/running route by shelling the `trails` engine
+  (`route.py`, from the skills repo) over the network (BRouter/Nominatim).
+  Writes a draft GPX (with `<wpt>` pins) + map HTML to a scratch dir keyed by
+  `name` (`TRAILS_DATA_DIR`, default `~/data/trails/<id>/`) and returns
+  plain-text metrics (miles, ascent, retrace, car/foot metres, resolved
+  geocodes) plus a map URL built from `TRAILS_HOST`. Nothing reaches the vault
+  until `save_route`. See `.env.example` for the `TRAILS_*` / `ROUTE_PY` config.
+- `save_route(id: string, filename?: string)` — copy a draft built by
+  `walk_route` into `vault/Travel/<filename>.gpx`, the gate before a route is
+  final. Returns the vault path; refuses an unknown id.
 
 ### Read (allowlist-scoped)
 

@@ -23,7 +23,9 @@ type Tool<Args, Deps> = {
   title: string;
   description: string;
   inputSchema: ZodRawShape;
-  run(deps: Deps, args: Args): string;
+  // Most tools are synchronous; walk_route shells out to the route engine, so a
+  // tool may also return a promise. Awaiting a plain string is a no-op.
+  run(deps: Deps, args: Args): string | Promise<string>;
 };
 
 export type ReadTool<Args = any> = Tool<Args, ReadDeps>;
