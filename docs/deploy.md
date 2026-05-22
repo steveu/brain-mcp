@@ -6,7 +6,7 @@ from a Claude.ai chat". Assumes the server is already running locally — see
 launchd job in [`ops/README.md`](../ops/README.md) is the supervisor.
 
 > **Status (2026-05-15).** Public ingress is a Cloudflare Tunnel fronting
-> `brain.urmston.org`. brain-mcp serves OAuth metadata, DCR, and a
+> `brain.example.org`. brain-mcp serves OAuth metadata, DCR, and a
 > token-gated `/authorize` page alongside the bearer-protected `/mcp`
 > endpoint, so the Claude.ai custom-connector UI can register against
 > it. Bearer auth on `/mcp` is unchanged for clients that can send
@@ -17,7 +17,7 @@ launchd job in [`ops/README.md`](../ops/README.md) is the supervisor.
 The shape:
 
 ```
-Claude.ai  →  https://brain.urmston.org  →  cloudflared (outbound)  →  127.0.0.1:8765
+Claude.ai  →  https://brain.example.org  →  cloudflared (outbound)  →  127.0.0.1:8765
 ```
 
 The server binds to `127.0.0.1` only (see `src/main.ts`) — `cloudflared`
@@ -29,21 +29,21 @@ depth.
 ## How `cloudflared` is wired up on the mini
 
 `cloudflared` runs as a single user launch agent
-(`~/Library/LaunchAgents/com.steveu.edge.cloudflared.plist`) supervising
+(`~/Library/LaunchAgents/com.YOU.edge.cloudflared.plist`) supervising
 one tunnel — `mac-mini-edge` — whose config lives at
 `~/code/edge/cloudflared/config.yml`. Adding a new public hostname
 means adding an `ingress:` rule there, not creating a second tunnel.
-Today the config fans out to both `pitchside.urmston.org` and
-`brain.urmston.org`:
+Today the config fans out to both `pitchside.example.org` and
+`brain.example.org`:
 
 ```yaml
 tunnel: <mac-mini-edge-uuid>
-credentials-file: /Users/steveu/code/edge/cloudflared/<uuid>.json
+credentials-file: /Users/YOU/code/edge/cloudflared/<uuid>.json
 
 ingress:
-  - hostname: pitchside.urmston.org
+  - hostname: pitchside.example.org
     service: http://localhost:8080
-  - hostname: brain.urmston.org
+  - hostname: brain.example.org
     service: http://127.0.0.1:8765
   - service: http_status:404
 ```
@@ -55,19 +55,19 @@ service.
 ## 1. Add the hostname to the tunnel
 
 From the mini, with `cloudflared` already authenticated against the
-Cloudflare account that owns `urmston.org`:
+Cloudflare account that owns `example.org`:
 
 ```sh
-cloudflared tunnel route dns mac-mini-edge brain.urmston.org
+cloudflared tunnel route dns mac-mini-edge brain.example.org
 ```
 
-That writes the `CNAME` for `brain.urmston.org` pointing at the
+That writes the `CNAME` for `brain.example.org` pointing at the
 `mac-mini-edge` tunnel. Proxied through Cloudflare, so TLS terminates
 at the edge.
 
 ## 2. Add the ingress rule
 
-Edit `~/code/edge/cloudflared/config.yml` to add the `brain.urmston.org`
+Edit `~/code/edge/cloudflared/config.yml` to add the `brain.example.org`
 entry above. Validate before reloading:
 
 ```sh
@@ -77,7 +77,7 @@ cloudflared tunnel --config ~/code/edge/cloudflared/config.yml ingress validate
 Reload the launch agent so the new rule is live:
 
 ```sh
-launchctl kickstart -k gui/$(id -u)/com.steveu.edge.cloudflared
+launchctl kickstart -k gui/$(id -u)/com.YOU.edge.cloudflared
 ```
 
 `cloudflared tunnel info mac-mini-edge` should show four active edge
@@ -89,7 +89,7 @@ Set `BRAIN_MCP_PUBLIC_URL` in the repo-root `.env` (no trailing slash,
 scheme included):
 
 ```
-BRAIN_MCP_PUBLIC_URL=https://brain.urmston.org
+BRAIN_MCP_PUBLIC_URL=https://brain.example.org
 ```
 
 Restart the brain-mcp launchd job so the OAuth endpoints come up bound
@@ -102,13 +102,13 @@ launchctl kickstart -k gui/$(id -u)/st.urm.brain-mcp
 Smoke-test the public surface:
 
 ```sh
-curl -s https://brain.urmston.org/healthz
-curl -s https://brain.urmston.org/.well-known/oauth-protected-resource/mcp
-curl -s https://brain.urmston.org/.well-known/oauth-authorization-server
+curl -s https://brain.example.org/healthz
+curl -s https://brain.example.org/.well-known/oauth-protected-resource/mcp
+curl -s https://brain.example.org/.well-known/oauth-authorization-server
 ```
 
 All three should return JSON. The `issuer` / `resource` fields should
-reflect `brain.urmston.org`. `/healthz` is unauthenticated
+reflect `brain.example.org`. `/healthz` is unauthenticated
 (`src/server.ts:198`), so it doubles as the probe target for an
 external uptime monitor (UptimeRobot or similar) — point one at it
 the day of cutover for a clean baseline.
@@ -126,7 +126,7 @@ Then in Claude.ai:
    exists.
 2. **Add custom connector.**
 3. **Name:** `brain` (or whatever; it's only the chat-UI label).
-4. **URL:** `https://brain.urmston.org/mcp`. Claude.ai discovers the
+4. **URL:** `https://brain.example.org/mcp`. Claude.ai discovers the
    authorization server via `WWW-Authenticate` on the first 401 and
    the protected-resource metadata document.
 5. **OAuth:** leave the **client ID** and **client secret** fields blank.
@@ -187,7 +187,7 @@ tokens stop working immediately.
 ## Footnote — previous edge: Tailscale Funnel
 
 The original edge for brain-mcp was Tailscale Funnel at
-`https://mini-steve.tail1b6462.ts.net/mcp`. Funnel is one command and
+`https://<machine>.<tailnet>.ts.net/mcp`. Funnel is one command and
 zero new accounts, so it was the right choice to get the service
 callable from Claude.ai for the first time. The service went down twice
 on 2026-05-15 from the perspective of both Claude Code and Claude.ai

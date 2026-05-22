@@ -5,8 +5,8 @@
 
 set -euo pipefail
 
-ENV_FILE="/Users/steveu/code/brain-mcp/.env"
-SERVER="/Users/steveu/code/brain-mcp/dist/main.js"
+ENV_FILE="$HOME/code/brain-mcp/.env"
+SERVER="$HOME/code/brain-mcp/dist/main.js"
 NODE="/opt/homebrew/bin/node"
 LOG="$HOME/Library/Logs/brain-mcp.log"
 

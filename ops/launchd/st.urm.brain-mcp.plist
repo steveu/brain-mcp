@@ -1,13 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
+<!-- Replace /Users/YOU below with your home directory before installing
+     (launchd does not expand ~ or $HOME in these paths). -->
 <dict>
     <key>Label</key>
     <string>st.urm.brain-mcp</string>
 
     <key>ProgramArguments</key>
     <array>
-        <string>/Users/steveu/code/brain-mcp/bin/brain-mcp-launcher</string>
+        <string>/Users/YOU/code/brain-mcp/bin/brain-mcp-launcher</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -27,13 +29,13 @@
         <key>PATH</key>
         <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin</string>
         <key>HOME</key>
-        <string>/Users/steveu</string>
+        <string>/Users/YOU</string>
     </dict>
 
     <key>StandardOutPath</key>
-    <string>/Users/steveu/Library/Logs/brain-mcp.launchd.log</string>
+    <string>/Users/YOU/Library/Logs/brain-mcp.launchd.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/steveu/Library/Logs/brain-mcp.launchd.log</string>
+    <string>/Users/YOU/Library/Logs/brain-mcp.launchd.log</string>
 </dict>
 </plist>
