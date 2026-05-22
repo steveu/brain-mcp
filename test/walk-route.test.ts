@@ -189,13 +189,15 @@ describe("findOutliers", () => {
     expect(findOutliers(CANNED.waypoints)).toEqual([]);
   });
 
-  it("flags a point tens of km from the centroid", () => {
+  it("flags only the genuinely isolated point, not the good cluster", () => {
+    // Two correct Yorkshire points and one wildly-wrong Boston/US result. A
+    // centroid test would flag all three; nearest-neighbour flags only Boston.
     const out = findOutliers([
-      { label: "A", ll: [53.97, -1.89] },
-      { label: "B", ll: [53.98, -1.88] },
-      { label: "Far", ll: [51.5, -0.12] },
+      { label: "Catgill", ll: [53.9742, -1.8942] },
+      { label: "Bolton Abbey", ll: [53.9836, -1.8889] },
+      { label: "Boston (wrong)", ll: [42.36, -71.06] },
     ]);
-    expect(out.map((o) => o.label)).toContain("Far");
+    expect(out.map((o) => o.label)).toEqual(["Boston (wrong)"]);
   });
 });
 

@@ -132,20 +132,29 @@ function haversineKm(a: LatLon, b: LatLon): number {
   return 2 * R * Math.asin(Math.sqrt(h));
 }
 
-// A waypoint resolving tens of km from the rest is almost always a bad geocode
-// (wrong town/country). Flag it rather than silently routing a wild line.
+// A waypoint resolving tens of km from every other point is almost always a bad
+// geocode (wrong town/country). Flag it rather than silently routing a wild line.
 const OUTLIER_KM = 50;
 
 type Outlier = { label: string | null; ll: LatLon; km: number };
 
+// Use nearest-neighbour distance, not distance-from-centroid: with one wildly
+// wrong point the centroid lands between the good cluster and the bad point, so
+// a centroid test would falsely accuse the good points too. A point whose
+// *nearest* neighbour is still far away is the genuine outlier.
 export function findOutliers(waypoints: EngineMetrics["waypoints"]): Outlier[] {
   if (waypoints.length < 3) return [];
-  const lat = waypoints.reduce((s, w) => s + w.ll[0], 0) / waypoints.length;
-  const lon = waypoints.reduce((s, w) => s + w.ll[1], 0) / waypoints.length;
-  const centroid: LatLon = [lat, lon];
   return waypoints
-    .map((w) => ({ label: w.label, ll: w.ll, km: haversineKm(w.ll, centroid) }))
-    .filter((w) => w.km > OUTLIER_KM);
+    .map((w) => {
+      let nearest = Infinity;
+      for (const other of waypoints) {
+        if (other === w) continue;
+        const d = haversineKm(w.ll, other.ll);
+        if (d < nearest) nearest = d;
+      }
+      return { label: w.label, ll: w.ll, km: nearest };
+    })
+    .filter((o) => o.km > OUTLIER_KM);
 }
 
 // --- formatting ---
@@ -163,7 +172,9 @@ function formatResponse(m: EngineMetrics, id: string, trailsHost?: string): stri
     lines.push("");
     lines.push("⚠ Possible bad geocode — these resolved far from the rest of the route:");
     for (const o of outliers) {
-      lines.push(`  • ${o.label ?? "(unnamed)"} → ${fmt(o.ll)} (${Math.round(o.km)} km out)`);
+      lines.push(
+        `  • ${o.label ?? "(unnamed)"} → ${fmt(o.ll)} (${Math.round(o.km)} km from the nearest other waypoint)`,
+      );
     }
   }
 
