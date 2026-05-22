@@ -29,15 +29,6 @@ const TILE_LAYER_RE = /^[A-Za-z]+_\d{3,5}$/;
 // appending `?key=<OS_API_KEY>` server-side. Keep in sync with route.py.
 const OS_TILE_BASE = "https://api.os.uk/maps/raster/v1/zxy";
 
-// Structural detector for a key-bearing OS tile URL in draft HTML: an api.os.uk
-// reference followed (in the same URL) by a `key=` query param. Matching the
-// shape rather than a specific key value catches a rotated/previous key, or any
-// key when none is configured on this service — the requirement is that *no* OS
-// key reaches the browser, not just the current one. `[^"'\s]*` stays within a
-// single URL token (quote/whitespace delimited) so an unrelated later `key=`
-// elsewhere in the page can't trip it.
-const KEYFUL_OS_URL_RE = /api\.os\.uk[^"'\s]*[?&]key=/i;
-
 export type TrailsServiceConfig = {
   /** Scratch dir holding one subdir per draft id (GPX + map HTML). */
   dataDir: string;
@@ -199,23 +190,10 @@ export function createTrailsService(config: TrailsServiceConfig): Express {
       return;
     }
 
-    // Fail closed on a key-ful draft. Until route.py emits /tiles-relative URLs
-    // (#33), walk_route can fall back to a standalone render that embeds an OS
-    // key directly in the HTML — serving that verbatim would leak a server-side
-    // key to the browser, which the issue forbids absolutely. Refuse on either
-    // signal: the exact configured key, or — structurally — any key-bearing
-    // api.os.uk URL (which also catches a rotated/previous key, or any key when
-    // none is configured here). Log a key-free warning so the misconfiguration
-    // is visible.
-    if ((osApiKey && html.includes(osApiKey)) || KEYFUL_OS_URL_RE.test(html)) {
-      logger.warn(
-        { event: "keyful_draft_refused", id },
-        "refused to serve a draft whose HTML embeds an OS key",
-      );
-      res.status(500).json({ error: "draft unavailable" });
-      return;
-    }
-
+    // No key-sniffing guard: route.py never embeds an OS key in a page (OS tiles
+    // are referenced through this service's /tiles proxy, which injects the key
+    // server-side; otherwise the page is OpenTopoMap). The key is structurally
+    // absent from any draft, so there is nothing to fail closed on.
     res.setHeader("Content-Type", "text/html; charset=utf-8");
     res.send(html);
   });

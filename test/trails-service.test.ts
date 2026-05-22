@@ -103,74 +103,7 @@ describe("createTrailsService — draft HTML", () => {
     await handle.close();
   });
 
-  it("refuses to serve a draft whose HTML embeds the OS key (fails closed, no leak)", async () => {
-    // Pre-#33, walk_route can fall back to a standalone render that bakes the
-    // OS key into the HTML. The service must never hand that to the browser.
-    const key = "os-key-that-must-never-be-served-LEAK";
-    const draftDir = path.join(dataDir, VALID_ID);
-    mkdirSync(draftDir, { recursive: true });
-    writeFileSync(
-      path.join(draftDir, "Keyful.html"),
-      `<html><body><script>L.tileLayer('https://api.os.uk/maps/raster/v1/zxy/Outdoor_27700/{z}/{x}/{y}.png?key=${key}')</script></body></html>`,
-      "utf8",
-    );
-
-    const app = createTrailsService({ dataDir, osApiKey: key });
-    const handle = await startEphemeral(app);
-
-    const res = await fetch(`${handle.url}/${VALID_ID}`);
-    expect(res.status).toBe(500);
-    const body = await res.text();
-    expect(body).not.toContain(key);
-
-    await handle.close();
-  });
-
-  it("refuses a key-ful draft even when no OS key is configured on the service", async () => {
-    // A draft generated with a previous key (since rotated/unset) must still not
-    // leak — the structural api.os.uk?key= detector catches it.
-    const draftDir = path.join(dataDir, VALID_ID);
-    mkdirSync(draftDir, { recursive: true });
-    const staleKey = "previous-key-no-longer-configured";
-    writeFileSync(
-      path.join(draftDir, "Stale.html"),
-      `<html><body>https://api.os.uk/maps/raster/v1/zxy/Outdoor_27700/{z}/{x}/{y}.png?key=${staleKey}</body></html>`,
-      "utf8",
-    );
-
-    const app = createTrailsService({ dataDir }); // no osApiKey
-    const handle = await startEphemeral(app);
-
-    const res = await fetch(`${handle.url}/${VALID_ID}`);
-    expect(res.status).toBe(500);
-    const body = await res.text();
-    expect(body).not.toContain(staleKey);
-
-    await handle.close();
-  });
-
-  it("refuses a key-ful draft whose embedded key differs from the configured one", async () => {
-    const draftDir = path.join(dataDir, VALID_ID);
-    mkdirSync(draftDir, { recursive: true });
-    const rotatedAway = "an-old-rotated-key-DIFFERENT";
-    writeFileSync(
-      path.join(draftDir, "Rotated.html"),
-      `<html><body>https://api.os.uk/maps/raster/v1/zxy/Leisure_27700/{z}/{x}/{y}.png?key=${rotatedAway}</body></html>`,
-      "utf8",
-    );
-
-    const app = createTrailsService({ dataDir, osApiKey: "the-current-key" });
-    const handle = await startEphemeral(app);
-
-    const res = await fetch(`${handle.url}/${VALID_ID}`);
-    expect(res.status).toBe(500);
-    const body = await res.text();
-    expect(body).not.toContain(rotatedAway);
-
-    await handle.close();
-  });
-
-  it("still serves a key-less draft when an OS key is configured", async () => {
+  it("serves a draft that references the /tiles proxy (no key in the page)", async () => {
     const key = "configured-but-not-in-this-html";
     const draftDir = path.join(dataDir, VALID_ID);
     mkdirSync(draftDir, { recursive: true });

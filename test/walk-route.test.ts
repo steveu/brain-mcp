@@ -287,24 +287,18 @@ describe("makeEngineRunner", () => {
     profile: "hiking-beta",
   };
 
-  it("retries without --tile-base when the engine rejects the unknown flag", async () => {
+  it("passes --tile-base when one is configured (OS via the proxy)", async () => {
     const calls: string[][] = [];
     const exec = async (_file: string, argv: string[]) => {
       calls.push(argv);
-      if (argv.includes("--tile-base")) {
-        const err = new Error("Command failed") as Error & { stderr: string };
-        err.stderr =
-          "usage: route.py ...\nroute.py: error: unrecognized arguments: --tile-base /tiles";
-        throw err;
-      }
       return { stdout: JSON.stringify(CANNED), stderr: "" };
     };
     const engine = makeEngineRunner(exec);
     const m = await engine({ ...base, tileBase: "/tiles" });
 
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(1);
     expect(calls[0]).toContain("--tile-base");
-    expect(calls[1]).not.toContain("--tile-base");
+    expect(calls[0]).toContain("/tiles");
     expect(m.miles).toBe(6.25);
   });
 
@@ -332,25 +326,20 @@ describe("makeEngineRunner", () => {
     );
   });
 
-  it("forces OpenTopoMap by blanking OS_API_KEY in the child env", async () => {
-    const prev = process.env.OS_API_KEY;
-    process.env.OS_API_KEY = "live-key";
-    try {
-      let capturedEnv: NodeJS.ProcessEnv | undefined;
-      const engine = makeEngineRunner(async (_file, _argv, opts) => {
-        capturedEnv = opts.env;
-        return { stdout: JSON.stringify(CANNED), stderr: "" };
-      });
+  it("withholds --tile-base when basemap is opentopo, even if a tile base is set", async () => {
+    const calls: string[][] = [];
+    const engine = makeEngineRunner(async (_file, argv) => {
+      calls.push(argv);
+      return { stdout: JSON.stringify(CANNED), stderr: "" };
+    });
 
-      await engine({ ...base, basemap: "opentopo" });
-      expect(capturedEnv?.OS_API_KEY).toBe("");
+    // opentopo forces the standalone render — no proxy path passed.
+    await engine({ ...base, tileBase: "/tiles", basemap: "opentopo" });
+    expect(calls[0]).not.toContain("--tile-base");
 
-      await engine({ ...base, basemap: "os" });
-      expect(capturedEnv?.OS_API_KEY).toBe("live-key");
-    } finally {
-      if (prev === undefined) delete process.env.OS_API_KEY;
-      else process.env.OS_API_KEY = prev;
-    }
+    // os keeps the proxy path.
+    await engine({ ...base, tileBase: "/tiles", basemap: "os" });
+    expect(calls[1]).toContain("--tile-base");
   });
 });
 
