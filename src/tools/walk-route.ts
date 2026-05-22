@@ -229,16 +229,18 @@ export function defaultDataDir(): string {
 
 // Drafts from walk_route are viewed through the map service, which proxies OS
 // tiles at /tiles (key injected server-side) on both the local 127.0.0.1
-// preview and the public host. The tile proxy is a property of that service —
-// available whenever it runs with OS_API_KEY — not of public exposure, so
-// default the OS render to /tiles regardless of TRAILS_HOST. (TRAILS_HOST only
-// governs whether a viewable map URL is returned.) TRAILS_TILE_BASE overrides;
-// set it empty to force a standalone OpenTopoMap render.
+// preview and the public host. The proxy can only serve OS tiles when it has an
+// OS key, so gate the default on OS_API_KEY (both processes source the same
+// .env): with a key, default OS renders to the key-less /tiles path regardless
+// of public exposure; without one, /tiles would 503, so fall back to a
+// standalone OpenTopoMap render. (TRAILS_HOST only governs whether a viewable
+// map URL is returned.) TRAILS_TILE_BASE overrides; set it empty to force the
+// OpenTopoMap render.
 export function defaultTileBase(): string | undefined {
   if (process.env.TRAILS_TILE_BASE !== undefined) {
     return process.env.TRAILS_TILE_BASE || undefined;
   }
-  return "/tiles";
+  return process.env.OS_API_KEY ? "/tiles" : undefined;
 }
 
 function defaultWalkRouteDeps(): WalkRouteDeps {
@@ -331,8 +333,8 @@ export const walkRouteTool: WriteTool<WalkRouteArgs> = {
       .optional()
       .describe(
         "Map preview basemap: 'os' (OS Outdoor detail, served via the map service's tile " +
-          "proxy) or 'opentopo' (OpenTopoMap). Defaults to OS when the map service is " +
-          "configured (TRAILS_HOST set), else OpenTopoMap.",
+          "proxy) or 'opentopo' (OpenTopoMap). Defaults to OS when an OS key is configured " +
+          "(OS_API_KEY), else OpenTopoMap.",
       ),
   },
   run: (_deps, args) => runWalkRoute(defaultWalkRouteDeps(), args),

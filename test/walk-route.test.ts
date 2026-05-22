@@ -240,10 +240,12 @@ describe("findOutliers", () => {
 describe("defaultTileBase", () => {
   let host: string | undefined;
   let tb: string | undefined;
+  let key: string | undefined;
 
   beforeEach(() => {
     host = process.env.TRAILS_HOST;
     tb = process.env.TRAILS_TILE_BASE;
+    key = process.env.OS_API_KEY;
   });
 
   afterEach(() => {
@@ -251,22 +253,33 @@ describe("defaultTileBase", () => {
     else process.env.TRAILS_HOST = host;
     if (tb === undefined) delete process.env.TRAILS_TILE_BASE;
     else process.env.TRAILS_TILE_BASE = tb;
+    if (key === undefined) delete process.env.OS_API_KEY;
+    else process.env.OS_API_KEY = key;
   });
 
-  it("defaults to /tiles (the service proxies OS tiles) regardless of TRAILS_HOST", () => {
+  it("defaults to /tiles when OS_API_KEY is set, regardless of TRAILS_HOST", () => {
     delete process.env.TRAILS_TILE_BASE;
+    process.env.OS_API_KEY = "live-key";
     process.env.TRAILS_HOST = "https://trails.example.org";
     expect(defaultTileBase()).toBe("/tiles");
     delete process.env.TRAILS_HOST;
     expect(defaultTileBase()).toBe("/tiles");
   });
 
-  it("honours an explicit TRAILS_TILE_BASE override", () => {
+  it("is undefined (OpenTopoMap) when OS_API_KEY is unset", () => {
+    delete process.env.TRAILS_TILE_BASE;
+    delete process.env.OS_API_KEY;
+    expect(defaultTileBase()).toBeUndefined();
+  });
+
+  it("honours an explicit TRAILS_TILE_BASE override even without a key", () => {
+    delete process.env.OS_API_KEY;
     process.env.TRAILS_TILE_BASE = "/map-tiles";
     expect(defaultTileBase()).toBe("/map-tiles");
   });
 
   it("treats an empty TRAILS_TILE_BASE as force-disabled (standalone OpenTopoMap)", () => {
+    process.env.OS_API_KEY = "live-key";
     process.env.TRAILS_TILE_BASE = "";
     expect(defaultTileBase()).toBeUndefined();
   });
