@@ -126,6 +126,50 @@ describe("createTrailsService — draft HTML", () => {
     await handle.close();
   });
 
+  it("refuses a key-ful draft even when no OS key is configured on the service", async () => {
+    // A draft generated with a previous key (since rotated/unset) must still not
+    // leak — the structural api.os.uk?key= detector catches it.
+    const draftDir = path.join(dataDir, VALID_ID);
+    mkdirSync(draftDir, { recursive: true });
+    const staleKey = "previous-key-no-longer-configured";
+    writeFileSync(
+      path.join(draftDir, "Stale.html"),
+      `<html><body>https://api.os.uk/maps/raster/v1/zxy/Outdoor_27700/{z}/{x}/{y}.png?key=${staleKey}</body></html>`,
+      "utf8",
+    );
+
+    const app = createTrailsService({ dataDir }); // no osApiKey
+    const handle = await startEphemeral(app);
+
+    const res = await fetch(`${handle.url}/${VALID_ID}`);
+    expect(res.status).toBe(500);
+    const body = await res.text();
+    expect(body).not.toContain(staleKey);
+
+    await handle.close();
+  });
+
+  it("refuses a key-ful draft whose embedded key differs from the configured one", async () => {
+    const draftDir = path.join(dataDir, VALID_ID);
+    mkdirSync(draftDir, { recursive: true });
+    const rotatedAway = "an-old-rotated-key-DIFFERENT";
+    writeFileSync(
+      path.join(draftDir, "Rotated.html"),
+      `<html><body>https://api.os.uk/maps/raster/v1/zxy/Leisure_27700/{z}/{x}/{y}.png?key=${rotatedAway}</body></html>`,
+      "utf8",
+    );
+
+    const app = createTrailsService({ dataDir, osApiKey: "the-current-key" });
+    const handle = await startEphemeral(app);
+
+    const res = await fetch(`${handle.url}/${VALID_ID}`);
+    expect(res.status).toBe(500);
+    const body = await res.text();
+    expect(body).not.toContain(rotatedAway);
+
+    await handle.close();
+  });
+
   it("still serves a key-less draft when an OS key is configured", async () => {
     const key = "configured-but-not-in-this-html";
     const draftDir = path.join(dataDir, VALID_ID);
