@@ -320,9 +320,13 @@ function defaultSaveRouteDeps(vault: string): SaveRouteDeps {
 }
 
 export function runSaveRoute(deps: SaveRouteDeps, args: SaveRouteArgs): string {
-  // ids are 16 hex chars; stripping non-hex also blocks any path traversal.
-  const id = String(args.id ?? "").replace(/[^a-f0-9]/gi, "");
-  if (!id) throw new Error("id is empty or invalid");
+  // Validate the id strictly rather than sanitising it: a mistyped id must be
+  // rejected, not silently coerced into a different (valid) draft. Requiring the
+  // exact 16-hex format also rules out any path traversal.
+  const id = String(args.id ?? "").trim().toLowerCase();
+  if (!/^[0-9a-f]{16}$/.test(id)) {
+    throw new Error("invalid draft id — expected 16 hex characters");
+  }
 
   const draftDir = path.join(deps.dataDir, id);
   if (!existsSync(draftDir)) throw new Error(`unknown draft id: ${id}`);

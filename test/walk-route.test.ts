@@ -331,12 +331,14 @@ describe("runSaveRoute", () => {
     );
   });
 
-  it("neutralises path-traversal attempts in the id", () => {
-    // Non-hex chars (including / and .) are stripped, so traversal cannot escape
-    // the data dir — it just resolves to a non-existent draft.
-    expect(() => runSaveRoute({ vault, dataDir }, { id: "../../etc/passwd" })).toThrow(
-      /unknown draft id|id is empty/,
-    );
+  it("rejects an id that is not exactly 16 hex chars (typo / traversal)", () => {
+    // Strict validation refuses anything off-format, so a mistyped id can't be
+    // coerced into a real draft and traversal can't escape the data dir.
+    for (const bad of ["../../etc/passwd", "a1b2c3d4e5f6071", "a1b2c3d4e5f60718x", "GHIJ"]) {
+      expect(() => runSaveRoute({ vault, dataDir }, { id: bad })).toThrow(
+        /invalid draft id/,
+      );
+    }
     expect(existsSync(path.join(vault, "Travel"))).toBe(false);
   });
 });
