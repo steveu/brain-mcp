@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, utimesSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -56,22 +56,23 @@ export type EngineRunner = (params: EngineParams) => Promise<EngineMetrics>;
 const BASEMAPS = ["os", "opentopo"] as const;
 type Basemap = (typeof BASEMAPS)[number];
 
-// route.py reads OS_API_KEY from its inherited env (OS Outdoor tiles) and falls
-// back to OpenTopoMap when absent. Forcing OpenTopoMap is therefore just running
-// the child with OS_API_KEY blanked — no engine flag needed.
+// route.py renders OS Outdoor tiles through the map service's /tiles proxy when
+// --tile-base is set, and OpenTopoMap otherwise. It no longer reads any OS key —
+// the key lives only in the map service — so choosing a basemap is purely a
+// matter of whether --tile-base is passed; no env munging is needed.
 type ExecFn = (
   file: string,
   args: string[],
-  opts: { env?: NodeJS.ProcessEnv; maxBuffer?: number },
+  opts: { maxBuffer?: number },
 ) => Promise<{ stdout: string; stderr: string }>;
 
 const MAX_BUFFER = 16 * 1024 * 1024;
 
-// Factory so tests can inject a fake exec and assert the shelled argv (including
-// the --tile-base retry) without invoking python or the network.
+// Factory so tests can inject a fake exec and assert the shelled argv without
+// invoking python or the network.
 export function makeEngineRunner(exec: ExecFn = execFileAsync as unknown as ExecFn): EngineRunner {
   return async (p: EngineParams): Promise<EngineMetrics> => {
-    const baseArgs = [
+    const args = [
       p.routePy,
       "--waypoints",
       p.waypoints,
@@ -82,24 +83,19 @@ export function makeEngineRunner(exec: ExecFn = execFileAsync as unknown as Exec
       "--profile",
       p.profile,
     ];
-    if (p.pins) baseArgs.push("--pins", p.pins);
+    if (p.pins) args.push("--pins", p.pins);
 
-    const env =
-      p.basemap === "opentopo" ? { ...process.env, OS_API_KEY: "" } : process.env;
-    const argv = p.tileBase ? [...baseArgs, "--tile-base", p.tileBase] : baseArgs;
+    // basemap "opentopo" forces the standalone OpenTopoMap render by withholding
+    // --tile-base; "os" (the default) routes OS tiles through the proxy whenever
+    // a tile base is configured.
+    const tileBase = p.basemap === "opentopo" ? undefined : p.tileBase;
+    if (tileBase) args.push("--tile-base", tileBase);
 
     try {
-      const { stdout } = await exec("python3", argv, { env, maxBuffer: MAX_BUFFER });
+      const { stdout } = await exec("python3", args, { maxBuffer: MAX_BUFFER });
       return JSON.parse(stdout) as EngineMetrics;
     } catch (err) {
       const stderr = String((err as { stderr?: unknown })?.stderr ?? "");
-      // The engine gains --tile-base in a later slice (skills repo). Until then
-      // argparse rejects it; fall back to a key-ful local render so the tool
-      // still works against an older engine.
-      if (p.tileBase && /unrecognized arguments/.test(stderr) && stderr.includes("--tile-base")) {
-        const { stdout } = await exec("python3", baseArgs, { env, maxBuffer: MAX_BUFFER });
-        return JSON.parse(stdout) as EngineMetrics;
-      }
       const message = stderr.trim() || String((err as Error)?.message ?? err);
       throw new Error(`route engine failed: ${message}`);
     }
@@ -223,20 +219,28 @@ export type WalkRouteDeps = {
   idSalt?: string;
 };
 
-function defaultDataDir(): string {
+// Exported so the standalone trails map service (src/trails-service.ts /
+// src/trails-main.ts) resolves the draft data dir from the same single source
+// of truth — both the writer (walk_route) and the reader (the map service)
+// must agree on `TRAILS_DATA_DIR || ~/data/trails`.
+export function defaultDataDir(): string {
   return process.env.TRAILS_DATA_DIR || path.join(homedir(), "data", "trails");
 }
 
-// The map HTML should use key-less /tiles only when a tile proxy is actually
-// fronting it — which is exactly when the service is deployed and TRAILS_HOST is
-// set. So default --tile-base to /tiles when TRAILS_HOST is set, and to nothing
-// (a standalone key-ful/OpenTopoMap render) when it isn't. TRAILS_TILE_BASE
-// overrides either way; set it empty to force a standalone render.
+// Drafts from walk_route are viewed through the map service, which proxies OS
+// tiles at /tiles (key injected server-side) on both the local 127.0.0.1
+// preview and the public host. The proxy can only serve OS tiles when it has an
+// OS key, so gate the default on OS_API_KEY (both processes source the same
+// .env): with a key, default OS renders to the key-less /tiles path regardless
+// of public exposure; without one, /tiles would 503, so fall back to a
+// standalone OpenTopoMap render. (TRAILS_HOST only governs whether a viewable
+// map URL is returned.) TRAILS_TILE_BASE overrides; set it empty to force the
+// OpenTopoMap render.
 export function defaultTileBase(): string | undefined {
   if (process.env.TRAILS_TILE_BASE !== undefined) {
     return process.env.TRAILS_TILE_BASE || undefined;
   }
-  return process.env.TRAILS_HOST ? "/tiles" : undefined;
+  return process.env.OS_API_KEY ? "/tiles" : undefined;
 }
 
 function defaultWalkRouteDeps(): WalkRouteDeps {
@@ -257,6 +261,15 @@ export async function runWalkRoute(deps: WalkRouteDeps, args: WalkRouteArgs): Pr
   const id = deriveId(name, deps.idSalt);
   const outDir = path.join(deps.dataDir, id);
   mkdirSync(outDir, { recursive: true });
+
+  // Touch the draft dir before the (slow, network-bound) engine run. The map
+  // service's TTL sweep ages a draft from the newest of its dir/files; for a
+  // deterministic dir that already exists, `mkdirSync` is a no-op and doesn't
+  // refresh the mtime, so a stale draft regenerated under the same name could
+  // otherwise be reaped by a sweep firing mid-render. Bumping the dir mtime now
+  // marks it active for the whole render window.
+  const startedAt = new Date();
+  utimesSync(outDir, startedAt, startedAt);
 
   const metrics = await deps.runEngine({
     routePy: deps.routePy,
@@ -319,8 +332,9 @@ export const walkRouteTool: WriteTool<WalkRouteArgs> = {
       .enum(BASEMAPS)
       .optional()
       .describe(
-        "Map preview basemap: 'os' (OS Outdoor; needs OS_API_KEY on the server) or 'opentopo' " +
-          "(OpenTopoMap, no key). Defaults to OS when a key is configured, else OpenTopoMap.",
+        "Map preview basemap: 'os' (OS Outdoor detail, served via the map service's tile " +
+          "proxy) or 'opentopo' (OpenTopoMap). Defaults to OS when an OS key is configured " +
+          "(OS_API_KEY), else OpenTopoMap.",
       ),
   },
   run: (_deps, args) => runWalkRoute(defaultWalkRouteDeps(), args),

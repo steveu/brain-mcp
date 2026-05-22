@@ -1,0 +1,43 @@
+#!/bin/bash
+# Launcher for the trails map service under launchd.
+# Sources the repo-root .env, then execs the Node service with absolute paths.
+# Driven by ~/Library/LaunchAgents/st.urm.trails.plist.
+# Separate process and port from brain-mcp — see ops/README.md.
+
+set -euo pipefail
+
+ENV_FILE="/Users/steveu/code/brain-mcp/.env"
+SERVER="/Users/steveu/code/brain-mcp/dist/trails-main.js"
+NODE="/opt/homebrew/bin/node"
+LOG="$HOME/Library/Logs/trails.log"
+
+exec >> "$LOG" 2>&1
+ts() { date "+%Y-%m-%dT%H:%M:%S%z"; }
+echo "=== $(ts) trails-launcher starting ==="
+
+if [[ ! -f "$ENV_FILE" ]]; then
+  echo "env file not found at $ENV_FILE — create it with OS_API_KEY=..."
+  exit 1
+fi
+
+# shellcheck disable=SC1090
+set -a
+source "$ENV_FILE"
+set +a
+
+if [[ -z "${OS_API_KEY:-}" ]]; then
+  echo "OS_API_KEY is unset or empty in $ENV_FILE — the tile proxy needs it"
+  exit 1
+fi
+
+if [[ ! -x "$NODE" ]]; then
+  echo "node not found at $NODE — install with 'brew install node'"
+  exit 1
+fi
+
+if [[ ! -f "$SERVER" ]]; then
+  echo "service bundle not found at $SERVER — run 'npm run build' in the repo"
+  exit 1
+fi
+
+exec "$NODE" "$SERVER"

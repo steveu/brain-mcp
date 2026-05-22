@@ -4,6 +4,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -121,6 +123,39 @@ describe("runWalkRoute", () => {
     expect(captured?.outDir).toBe(first);
   });
 
+  it("refreshes the draft dir mtime before the engine runs so a regeneration isn't swept", async () => {
+    // First render to create the deterministic dir, then backdate it well into
+    // the past — simulating a draft last touched beyond the sweep TTL.
+    await runWalkRoute(
+      { runEngine: stubEngine, dataDir, routePy: "/r.py" },
+      { waypoints: "A|B", name: "Regen" },
+    );
+    const outDir = captured!.outDir;
+    const ancient = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    utimesSync(outDir, ancient, ancient);
+
+    // An engine that records the dir mtime *as the engine starts* (before it
+    // writes any file) — that mtime must already be fresh, proving runWalkRoute
+    // touched the dir before the slow render rather than relying on the engine's
+    // file writes.
+    let mtimeAtEngineStart = 0;
+    const observingEngine: EngineRunner = async (p) => {
+      mtimeAtEngineStart = statSync(p.outDir).mtimeMs;
+      mkdirSync(p.outDir, { recursive: true });
+      writeFileSync(path.join(p.outDir, `${p.name}.gpx`), "<gpx/>", "utf8");
+      return { ...CANNED, name: p.name };
+    };
+
+    const before = Date.now();
+    await runWalkRoute(
+      { runEngine: observingEngine, dataDir, routePy: "/r.py" },
+      { waypoints: "A|B|C", name: "Regen" },
+    );
+
+    // The dir was touched to ~now before the engine ran, not left ancient.
+    expect(mtimeAtEngineStart).toBeGreaterThanOrEqual(before - 2000);
+  });
+
   it("passes pins, profile and basemap through to the engine", async () => {
     await runWalkRoute(
       { runEngine: stubEngine, dataDir, routePy: "/r.py" },
@@ -205,10 +240,12 @@ describe("findOutliers", () => {
 describe("defaultTileBase", () => {
   let host: string | undefined;
   let tb: string | undefined;
+  let key: string | undefined;
 
   beforeEach(() => {
     host = process.env.TRAILS_HOST;
     tb = process.env.TRAILS_TILE_BASE;
+    key = process.env.OS_API_KEY;
   });
 
   afterEach(() => {
@@ -216,28 +253,33 @@ describe("defaultTileBase", () => {
     else process.env.TRAILS_HOST = host;
     if (tb === undefined) delete process.env.TRAILS_TILE_BASE;
     else process.env.TRAILS_TILE_BASE = tb;
+    if (key === undefined) delete process.env.OS_API_KEY;
+    else process.env.OS_API_KEY = key;
   });
 
-  it("defaults to /tiles when TRAILS_HOST is set (service deployed)", () => {
-    process.env.TRAILS_HOST = "https://trails.example.org";
+  it("defaults to /tiles when OS_API_KEY is set, regardless of TRAILS_HOST", () => {
     delete process.env.TRAILS_TILE_BASE;
+    process.env.OS_API_KEY = "live-key";
+    process.env.TRAILS_HOST = "https://trails.example.org";
+    expect(defaultTileBase()).toBe("/tiles");
+    delete process.env.TRAILS_HOST;
     expect(defaultTileBase()).toBe("/tiles");
   });
 
-  it("is undefined when TRAILS_HOST is unset (standalone render)", () => {
-    delete process.env.TRAILS_HOST;
+  it("is undefined (OpenTopoMap) when OS_API_KEY is unset", () => {
     delete process.env.TRAILS_TILE_BASE;
+    delete process.env.OS_API_KEY;
     expect(defaultTileBase()).toBeUndefined();
   });
 
-  it("honours an explicit TRAILS_TILE_BASE override", () => {
-    process.env.TRAILS_HOST = "https://trails.example.org";
+  it("honours an explicit TRAILS_TILE_BASE override even without a key", () => {
+    delete process.env.OS_API_KEY;
     process.env.TRAILS_TILE_BASE = "/map-tiles";
     expect(defaultTileBase()).toBe("/map-tiles");
   });
 
-  it("treats an empty TRAILS_TILE_BASE as force-disabled", () => {
-    process.env.TRAILS_HOST = "https://trails.example.org";
+  it("treats an empty TRAILS_TILE_BASE as force-disabled (standalone OpenTopoMap)", () => {
+    process.env.OS_API_KEY = "live-key";
     process.env.TRAILS_TILE_BASE = "";
     expect(defaultTileBase()).toBeUndefined();
   });
@@ -252,24 +294,18 @@ describe("makeEngineRunner", () => {
     profile: "hiking-beta",
   };
 
-  it("retries without --tile-base when the engine rejects the unknown flag", async () => {
+  it("passes --tile-base when one is configured (OS via the proxy)", async () => {
     const calls: string[][] = [];
     const exec = async (_file: string, argv: string[]) => {
       calls.push(argv);
-      if (argv.includes("--tile-base")) {
-        const err = new Error("Command failed") as Error & { stderr: string };
-        err.stderr =
-          "usage: route.py ...\nroute.py: error: unrecognized arguments: --tile-base /tiles";
-        throw err;
-      }
       return { stdout: JSON.stringify(CANNED), stderr: "" };
     };
     const engine = makeEngineRunner(exec);
     const m = await engine({ ...base, tileBase: "/tiles" });
 
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(1);
     expect(calls[0]).toContain("--tile-base");
-    expect(calls[1]).not.toContain("--tile-base");
+    expect(calls[0]).toContain("/tiles");
     expect(m.miles).toBe(6.25);
   });
 
@@ -297,25 +333,20 @@ describe("makeEngineRunner", () => {
     );
   });
 
-  it("forces OpenTopoMap by blanking OS_API_KEY in the child env", async () => {
-    const prev = process.env.OS_API_KEY;
-    process.env.OS_API_KEY = "live-key";
-    try {
-      let capturedEnv: NodeJS.ProcessEnv | undefined;
-      const engine = makeEngineRunner(async (_file, _argv, opts) => {
-        capturedEnv = opts.env;
-        return { stdout: JSON.stringify(CANNED), stderr: "" };
-      });
+  it("withholds --tile-base when basemap is opentopo, even if a tile base is set", async () => {
+    const calls: string[][] = [];
+    const engine = makeEngineRunner(async (_file, argv) => {
+      calls.push(argv);
+      return { stdout: JSON.stringify(CANNED), stderr: "" };
+    });
 
-      await engine({ ...base, basemap: "opentopo" });
-      expect(capturedEnv?.OS_API_KEY).toBe("");
+    // opentopo forces the standalone render — no proxy path passed.
+    await engine({ ...base, tileBase: "/tiles", basemap: "opentopo" });
+    expect(calls[0]).not.toContain("--tile-base");
 
-      await engine({ ...base, basemap: "os" });
-      expect(capturedEnv?.OS_API_KEY).toBe("live-key");
-    } finally {
-      if (prev === undefined) delete process.env.OS_API_KEY;
-      else process.env.OS_API_KEY = prev;
-    }
+    // os keeps the proxy path.
+    await engine({ ...base, tileBase: "/tiles", basemap: "os" });
+    expect(calls[1]).toContain("--tile-base");
   });
 });
 
