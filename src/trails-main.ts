@@ -3,7 +3,12 @@ import { homedir } from "node:os";
 import path from "node:path";
 import { createAppLogger } from "./logger.js";
 import { defaultDataDir } from "./tools/walk-route.js";
-import { createTrailsService, sweepDrafts, type TrailsServiceConfig } from "./trails-service.js";
+import {
+  createTrailsService,
+  purgeUnsafeDrafts,
+  sweepDrafts,
+  type TrailsServiceConfig,
+} from "./trails-service.js";
 
 // Entry point for the standalone trails map service. Mirrors src/main.ts: read
 // config from env, bind a loopback listener, wire close-with-grace, and use the
@@ -45,6 +50,25 @@ function main(): void {
   const { config, port, dataDir, ttlMs } = readConfig();
   const logger = config.logger;
   const app = createTrailsService(config);
+
+  // One-time migration before serving: delete any stale pre-#33 draft whose HTML
+  // embeds an OS key, so the service can never hand a key-bearing page to a
+  // browser. Synchronous, so it completes before any request is accepted; a
+  // no-op on a clean dir since current renders are key-less.
+  try {
+    const purged = purgeUnsafeDrafts(dataDir);
+    if (purged.length > 0) {
+      logger?.warn(
+        { event: "draft_purge", count: purged.length },
+        "purged stale drafts that embedded an OS key",
+      );
+    }
+  } catch (err) {
+    logger?.warn(
+      { event: "draft_purge", err_message: (err as Error).message },
+      "draft purge failed",
+    );
+  }
 
   const httpServer = app.listen(port, "127.0.0.1", () => {
     const tileMode = config.osApiKey

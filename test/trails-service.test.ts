@@ -1,9 +1,9 @@
-import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createTrailsService, sweepDrafts } from "../src/trails-service.js";
+import { createTrailsService, purgeUnsafeDrafts, sweepDrafts } from "../src/trails-service.js";
 
 // A valid draft id is 16 hex chars (walk-route.ts deriveId / save_route regex).
 const VALID_ID = "0123456789abcdef";
@@ -320,5 +320,65 @@ describe("sweepDrafts", () => {
 
   it("returns 0 when the data dir does not exist", () => {
     expect(sweepDrafts(path.join(dataDir, "missing"), 1)).toBe(0);
+  });
+});
+
+describe("purgeUnsafeDrafts", () => {
+  let dataDir: string;
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(path.join(tmpdir(), "trails-purge-"));
+  });
+
+  afterEach(() => {
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it("purges a key-bearing pre-#33 draft and keeps key-less ones", () => {
+    const keyfulId = "1111111111111111";
+    const proxyId = "2222222222222222";
+    const topoId = "3333333333333333";
+    const keyful = path.join(dataDir, keyfulId);
+    const proxy = path.join(dataDir, proxyId);
+    const topo = path.join(dataDir, topoId);
+    mkdirSync(keyful, { recursive: true });
+    mkdirSync(proxy, { recursive: true });
+    mkdirSync(topo, { recursive: true });
+    writeFileSync(
+      path.join(keyful, "Old.html"),
+      "<html><body>https://api.os.uk/maps/raster/v1/zxy/Outdoor_27700/{z}/{x}/{y}.png?key=LEAKME</body></html>",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(proxy, "Proxy.html"),
+      "<html><body><script>L.tileLayer('/tiles/Outdoor_27700/{z}/{x}/{y}.png')</script></body></html>",
+      "utf8",
+    );
+    writeFileSync(
+      path.join(topo, "Topo.html"),
+      "<html><body><script>L.tileLayer('https://a.tile.opentopomap.org/{z}/{x}/{y}.png')</script></body></html>",
+      "utf8",
+    );
+
+    const purged = purgeUnsafeDrafts(dataDir);
+    expect(purged).toEqual([keyfulId]);
+    expect(existsSync(keyful)).toBe(false);
+    expect(existsSync(proxy)).toBe(true);
+    expect(existsSync(topo)).toBe(true);
+  });
+
+  it("ignores non-draft entries and draft dirs with no HTML", () => {
+    writeFileSync(path.join(dataDir, "README.txt"), "x", "utf8");
+    mkdirSync(path.join(dataDir, "not-a-draft"), { recursive: true });
+    const noHtml = path.join(dataDir, "4444444444444444");
+    mkdirSync(noHtml, { recursive: true });
+    writeFileSync(path.join(noHtml, "route.gpx"), "<gpx/>", "utf8");
+
+    expect(purgeUnsafeDrafts(dataDir)).toEqual([]);
+    expect(existsSync(noHtml)).toBe(true);
+  });
+
+  it("returns [] when the data dir does not exist", () => {
+    expect(purgeUnsafeDrafts(path.join(dataDir, "missing"))).toEqual([]);
   });
 });

@@ -29,6 +29,11 @@ const TILE_LAYER_RE = /^[A-Za-z]+_\d{3,5}$/;
 // appending `?key=<OS_API_KEY>` server-side. Keep in sync with route.py.
 const OS_TILE_BASE = "https://api.os.uk/maps/raster/v1/zxy";
 
+// Shape of a key-bearing OS tile URL — the literal the pre-#33 engine baked into
+// standalone renders. Used only by the one-time startup purge below; current
+// renders (OS via the /tiles proxy, or OpenTopoMap) never contain it.
+const KEYFUL_OS_URL_RE = /api\.os\.uk[^"'\s]*[?&]key=/i;
+
 export type TrailsServiceConfig = {
   /** Scratch dir holding one subdir per draft id (GPX + map HTML). */
   dataDir: string;
@@ -229,6 +234,44 @@ function draftLastTouchedMs(dir: string): number {
     }
   }
   return newest;
+}
+
+/**
+ * One-time migration purge. route.py no longer embeds an OS key in any page, but
+ * a draft written by the pre-#33 engine could still be sitting in `dataDir`
+ * within the TTL window with the key baked into its HTML — serving that verbatim
+ * would leak it. Delete any such draft and return the purged ids. Pure and
+ * exported so trails-main.ts can run it once at startup and it is unit-testable;
+ * current key-less renders never match, so it no-ops on a clean dir.
+ */
+export function purgeUnsafeDrafts(dataDir: string): string[] {
+  if (!existsSync(dataDir)) return [];
+
+  let entries: string[];
+  try {
+    entries = readdirSync(dataDir);
+  } catch {
+    return [];
+  }
+
+  const purged: string[] = [];
+  for (const name of entries) {
+    if (!DRAFT_ID_RE.test(name)) continue;
+    const dir = path.join(dataDir, name);
+    try {
+      if (!statSync(dir).isDirectory()) continue;
+      const htmlFile = readdirSync(dir).find((f) => f.toLowerCase().endsWith(".html"));
+      if (!htmlFile) continue;
+      if (KEYFUL_OS_URL_RE.test(readFileSync(path.join(dir, htmlFile), "utf8"))) {
+        rmSync(dir, { recursive: true, force: true });
+        purged.push(name);
+      }
+    } catch {
+      // A draft that vanished or can't be read between calls is not our problem.
+    }
+  }
+
+  return purged;
 }
 
 /**
