@@ -227,16 +227,18 @@ export function defaultDataDir(): string {
   return process.env.TRAILS_DATA_DIR || path.join(homedir(), "data", "trails");
 }
 
-// The map HTML should use key-less /tiles only when a tile proxy is actually
-// fronting it — which is exactly when the service is deployed and TRAILS_HOST is
-// set. So default --tile-base to /tiles when TRAILS_HOST is set, and to nothing
-// (a standalone key-ful/OpenTopoMap render) when it isn't. TRAILS_TILE_BASE
-// overrides either way; set it empty to force a standalone render.
+// Drafts from walk_route are viewed through the map service, which proxies OS
+// tiles at /tiles (key injected server-side) on both the local 127.0.0.1
+// preview and the public host. The tile proxy is a property of that service —
+// available whenever it runs with OS_API_KEY — not of public exposure, so
+// default the OS render to /tiles regardless of TRAILS_HOST. (TRAILS_HOST only
+// governs whether a viewable map URL is returned.) TRAILS_TILE_BASE overrides;
+// set it empty to force a standalone OpenTopoMap render.
 export function defaultTileBase(): string | undefined {
   if (process.env.TRAILS_TILE_BASE !== undefined) {
     return process.env.TRAILS_TILE_BASE || undefined;
   }
-  return process.env.TRAILS_HOST ? "/tiles" : undefined;
+  return "/tiles";
 }
 
 function defaultWalkRouteDeps(): WalkRouteDeps {

@@ -253,26 +253,20 @@ describe("defaultTileBase", () => {
     else process.env.TRAILS_TILE_BASE = tb;
   });
 
-  it("defaults to /tiles when TRAILS_HOST is set (service deployed)", () => {
-    process.env.TRAILS_HOST = "https://trails.example.org";
+  it("defaults to /tiles (the service proxies OS tiles) regardless of TRAILS_HOST", () => {
     delete process.env.TRAILS_TILE_BASE;
+    process.env.TRAILS_HOST = "https://trails.example.org";
+    expect(defaultTileBase()).toBe("/tiles");
+    delete process.env.TRAILS_HOST;
     expect(defaultTileBase()).toBe("/tiles");
   });
 
-  it("is undefined when TRAILS_HOST is unset (standalone render)", () => {
-    delete process.env.TRAILS_HOST;
-    delete process.env.TRAILS_TILE_BASE;
-    expect(defaultTileBase()).toBeUndefined();
-  });
-
   it("honours an explicit TRAILS_TILE_BASE override", () => {
-    process.env.TRAILS_HOST = "https://trails.example.org";
     process.env.TRAILS_TILE_BASE = "/map-tiles";
     expect(defaultTileBase()).toBe("/map-tiles");
   });
 
-  it("treats an empty TRAILS_TILE_BASE as force-disabled", () => {
-    process.env.TRAILS_HOST = "https://trails.example.org";
+  it("treats an empty TRAILS_TILE_BASE as force-disabled (standalone OpenTopoMap)", () => {
     process.env.TRAILS_TILE_BASE = "";
     expect(defaultTileBase()).toBeUndefined();
   });
