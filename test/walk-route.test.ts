@@ -4,6 +4,8 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -119,6 +121,39 @@ describe("runWalkRoute", () => {
       { waypoints: "A|B|C", name: "Stable" },
     );
     expect(captured?.outDir).toBe(first);
+  });
+
+  it("refreshes the draft dir mtime before the engine runs so a regeneration isn't swept", async () => {
+    // First render to create the deterministic dir, then backdate it well into
+    // the past — simulating a draft last touched beyond the sweep TTL.
+    await runWalkRoute(
+      { runEngine: stubEngine, dataDir, routePy: "/r.py" },
+      { waypoints: "A|B", name: "Regen" },
+    );
+    const outDir = captured!.outDir;
+    const ancient = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    utimesSync(outDir, ancient, ancient);
+
+    // An engine that records the dir mtime *as the engine starts* (before it
+    // writes any file) — that mtime must already be fresh, proving runWalkRoute
+    // touched the dir before the slow render rather than relying on the engine's
+    // file writes.
+    let mtimeAtEngineStart = 0;
+    const observingEngine: EngineRunner = async (p) => {
+      mtimeAtEngineStart = statSync(p.outDir).mtimeMs;
+      mkdirSync(p.outDir, { recursive: true });
+      writeFileSync(path.join(p.outDir, `${p.name}.gpx`), "<gpx/>", "utf8");
+      return { ...CANNED, name: p.name };
+    };
+
+    const before = Date.now();
+    await runWalkRoute(
+      { runEngine: observingEngine, dataDir, routePy: "/r.py" },
+      { waypoints: "A|B|C", name: "Regen" },
+    );
+
+    // The dir was touched to ~now before the engine ran, not left ancient.
+    expect(mtimeAtEngineStart).toBeGreaterThanOrEqual(before - 2000);
   });
 
   it("passes pins, profile and basemap through to the engine", async () => {

@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, mkdirSync, readdirSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readdirSync, utimesSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -261,6 +261,15 @@ export async function runWalkRoute(deps: WalkRouteDeps, args: WalkRouteArgs): Pr
   const id = deriveId(name, deps.idSalt);
   const outDir = path.join(deps.dataDir, id);
   mkdirSync(outDir, { recursive: true });
+
+  // Touch the draft dir before the (slow, network-bound) engine run. The map
+  // service's TTL sweep ages a draft from the newest of its dir/files; for a
+  // deterministic dir that already exists, `mkdirSync` is a no-op and doesn't
+  // refresh the mtime, so a stale draft regenerated under the same name could
+  // otherwise be reaped by a sweep firing mid-render. Bumping the dir mtime now
+  // marks it active for the whole render window.
+  const startedAt = new Date();
+  utimesSync(outDir, startedAt, startedAt);
 
   const metrics = await deps.runEngine({
     routePy: deps.routePy,
