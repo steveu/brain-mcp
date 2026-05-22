@@ -102,6 +102,49 @@ describe("createTrailsService — draft HTML", () => {
 
     await handle.close();
   });
+
+  it("refuses to serve a draft whose HTML embeds the OS key (fails closed, no leak)", async () => {
+    // Pre-#33, walk_route can fall back to a standalone render that bakes the
+    // OS key into the HTML. The service must never hand that to the browser.
+    const key = "os-key-that-must-never-be-served-LEAK";
+    const draftDir = path.join(dataDir, VALID_ID);
+    mkdirSync(draftDir, { recursive: true });
+    writeFileSync(
+      path.join(draftDir, "Keyful.html"),
+      `<html><body><script>L.tileLayer('https://api.os.uk/maps/raster/v1/zxy/Outdoor_27700/{z}/{x}/{y}.png?key=${key}')</script></body></html>`,
+      "utf8",
+    );
+
+    const app = createTrailsService({ dataDir, osApiKey: key });
+    const handle = await startEphemeral(app);
+
+    const res = await fetch(`${handle.url}/${VALID_ID}`);
+    expect(res.status).toBe(500);
+    const body = await res.text();
+    expect(body).not.toContain(key);
+
+    await handle.close();
+  });
+
+  it("still serves a key-less draft when an OS key is configured", async () => {
+    const key = "configured-but-not-in-this-html";
+    const draftDir = path.join(dataDir, VALID_ID);
+    mkdirSync(draftDir, { recursive: true });
+    writeFileSync(
+      path.join(draftDir, "Clean.html"),
+      "<html><body><script>L.tileLayer('/tiles/Outdoor_27700/{z}/{x}/{y}.png')</script>route preview</body></html>",
+      "utf8",
+    );
+
+    const app = createTrailsService({ dataDir, osApiKey: key });
+    const handle = await startEphemeral(app);
+
+    const res = await fetch(`${handle.url}/${VALID_ID}`);
+    expect(res.status).toBe(200);
+    expect(await res.text()).toContain("route preview");
+
+    await handle.close();
+  });
 });
 
 describe("createTrailsService — tile proxy", () => {

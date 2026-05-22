@@ -1,5 +1,5 @@
 import express, { type Request, type Response, type Express } from "express";
-import { existsSync, readdirSync, rmSync, statSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import path from "node:path";
 import { pinoHttp } from "pino-http";
 import type { AppLogger } from "./logger.js";
@@ -181,7 +181,32 @@ export function createTrailsService(config: TrailsServiceConfig): Express {
     // Absolute, validated path — id matched DRAFT_ID_RE and htmlFile is a real
     // dirent name from the draft dir, so neither can escape dataDir.
     const htmlPath = path.join(draftDir, htmlFile);
-    res.sendFile(htmlPath, { headers: { "Content-Type": "text/html; charset=utf-8" } });
+
+    let html: string;
+    try {
+      html = readFileSync(htmlPath, "utf8");
+    } catch {
+      res.status(404).json({ error: "not found" });
+      return;
+    }
+
+    // Fail closed on a key-ful draft. Until route.py emits /tiles-relative URLs
+    // (#33), walk_route can fall back to a standalone render that embeds
+    // OS_API_KEY directly in the HTML — serving that verbatim would leak the
+    // server-side key to the browser, which the issue forbids absolutely. Refuse
+    // rather than serve, and log a key-free warning so the misconfiguration is
+    // visible. (When no key is configured here there is nothing of ours to leak.)
+    if (osApiKey && html.includes(osApiKey)) {
+      logger.warn(
+        { event: "keyful_draft_refused", id },
+        "refused to serve a draft whose HTML embeds the OS key",
+      );
+      res.status(500).json({ error: "draft unavailable" });
+      return;
+    }
+
+    res.setHeader("Content-Type", "text/html; charset=utf-8");
+    res.send(html);
   });
 
   return app;
