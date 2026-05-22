@@ -168,6 +168,31 @@ line. If it didn't land, in order of likelihood:
   mini; if that fails, see [`ops/README.md`](../ops/README.md) for
   launchd debugging.
 
+## The trails map service (second process)
+
+The walk-route preview map and OS tile proxy run as a **separate** Node process
+on its own loopback port — `127.0.0.1:8766` by default (`TRAILS_PORT`), distinct
+from the MCP server's `8765`. Keeping it on its own port means its public
+exposure is independent of the `/mcp` connector. It is supervised by its own
+launchd job (`st.urm.trails`); see [`ops/README.md`](../ops/README.md) for the
+one-time install. Like the MCP server it binds `127.0.0.1` only — nothing is
+reachable from the LAN until a tunnel fronts it.
+
+What it serves:
+
+- `GET /<id>` → the interactive route-preview HTML for a walk_route draft.
+- `GET /tiles/<layer>/<z>/<x>/<y>.png` → the corresponding `api.os.uk` raster
+  tile, with the OS Data Hub key (`OS_API_KEY`) injected server-side. The key
+  never appears in any client-visible response, header, or log line.
+- `GET /healthz` → `{"ok":true}`, the tunnel readiness probe.
+
+Public exposure at `trails.urmston.org` is a **separate, later step** — it
+needs a DNS record and a Cloudflare Tunnel ingress rule (another `hostname:`
+entry in `~/code/edge/cloudflared/config.yml` pointing at
+`http://127.0.0.1:8766`, following the same shape as `brain.urmston.org`
+above). That work is tracked in #35 and is out of scope here; until it lands
+the service is loopback-only and `TRAILS_HOST` stays unset.
+
 ## Token rotation
 
 The token sits in three places: the repo-root `.env`, the launched

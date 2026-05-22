@@ -223,7 +223,11 @@ export type WalkRouteDeps = {
   idSalt?: string;
 };
 
-function defaultDataDir(): string {
+// Exported so the standalone trails map service (src/trails-service.ts /
+// src/trails-main.ts) resolves the draft data dir from the same single source
+// of truth — both the writer (walk_route) and the reader (the map service)
+// must agree on `TRAILS_DATA_DIR || ~/data/trails`.
+export function defaultDataDir(): string {
   return process.env.TRAILS_DATA_DIR || path.join(homedir(), "data", "trails");
 }
 
