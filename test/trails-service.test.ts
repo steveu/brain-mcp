@@ -243,18 +243,43 @@ describe("sweepDrafts", () => {
     const freshDir = path.join(dataDir, freshId);
     mkdirSync(oldDir, { recursive: true });
     mkdirSync(freshDir, { recursive: true });
-    writeFileSync(path.join(oldDir, "x.html"), "old", "utf8");
+    const oldHtml = path.join(oldDir, "x.html");
+    writeFileSync(oldHtml, "old", "utf8");
     writeFileSync(path.join(freshDir, "x.html"), "fresh", "utf8");
 
-    // Backdate the old dir's mtime well past the TTL.
+    // Backdate both the old dir AND its contents well past the TTL — the sweep
+    // ages from the newest contained file, so a stale-but-fresh-file draft must
+    // survive (see the regeneration test below).
     const now = Date.now();
     const old = new Date(now - 2 * ttlMs);
+    utimesSync(oldHtml, old, old);
     utimesSync(oldDir, old, old);
 
     const removed = sweepDrafts(dataDir, ttlMs, now);
     expect(removed).toBe(1);
 
     // Re-running finds nothing further to remove.
+    expect(sweepDrafts(dataDir, ttlMs, now)).toBe(0);
+  });
+
+  it("keeps a draft whose dir mtime is stale but whose files were just rewritten", () => {
+    // walk_route reuses a deterministic draft dir and the engine overwrites the
+    // same files in place — which bumps file mtimes but not the dir mtime. The
+    // sweep must not reap a draft that was just regenerated.
+    const id = "cccccccccccccccc";
+    const ttlMs = 24 * 60 * 60 * 1000; // 1 day
+    const dir = path.join(dataDir, id);
+    mkdirSync(dir, { recursive: true });
+    const html = path.join(dir, "My Walk.html");
+    writeFileSync(html, "regenerated", "utf8");
+
+    const now = Date.now();
+    // Dir mtime is ancient; the file is current (just rewritten).
+    const ancient = new Date(now - 5 * ttlMs);
+    utimesSync(dir, ancient, ancient);
+    const fresh = new Date(now - 60 * 1000); // a minute ago
+    utimesSync(html, fresh, fresh);
+
     expect(sweepDrafts(dataDir, ttlMs, now)).toBe(0);
   });
 

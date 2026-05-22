@@ -188,11 +188,41 @@ export function createTrailsService(config: TrailsServiceConfig): Express {
 }
 
 /**
- * Remove draft subdirs older than `ttlMs` (by directory mtime) from `dataDir`.
- * Exported and pure (clock injectable via `now`) so it is unit-testable without
- * waiting on a timer; trails-main.ts schedules it on an interval. Only direct
- * children of `dataDir` whose name matches the draft-id shape are considered, so
- * a stray file or unrelated dir is left alone.
+ * Most-recent mtime among a draft dir and its direct contents, in ms.
+ *
+ * Aging from the directory mtime alone is wrong: walk_route reuses a
+ * deterministic draft dir keyed by route name, and the engine *overwrites* the
+ * same `.gpx`/`.html` files on a rerun. Overwriting a file bumps the file's
+ * mtime, not the parent directory's (a dir's mtime only moves when entries are
+ * added/removed/renamed), so an actively-regenerated draft would keep its
+ * original dir mtime and could be swept while still in use. Taking the newest
+ * mtime across the dir and its files reflects real activity in either case.
+ */
+function draftLastTouchedMs(dir: string): number {
+  let newest = statSync(dir).mtimeMs;
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return newest;
+  }
+  for (const name of names) {
+    try {
+      const m = statSync(path.join(dir, name)).mtimeMs;
+      if (m > newest) newest = m;
+    } catch {
+      // A file that vanished between readdir and stat is not our problem.
+    }
+  }
+  return newest;
+}
+
+/**
+ * Remove draft subdirs whose newest contained file (or the dir itself) is older
+ * than `ttlMs` from `dataDir`. Exported and pure (clock injectable via `now`) so
+ * it is unit-testable without waiting on a timer; trails-main.ts schedules it on
+ * an interval. Only direct children of `dataDir` whose name matches the draft-id
+ * shape are considered, so a stray file or unrelated dir is left alone.
  */
 export function sweepDrafts(dataDir: string, ttlMs: number, now: number = Date.now()): number {
   if (!existsSync(dataDir)) return 0;
@@ -211,7 +241,7 @@ export function sweepDrafts(dataDir: string, ttlMs: number, now: number = Date.n
     try {
       const stat = statSync(dir);
       if (!stat.isDirectory()) continue;
-      if (now - stat.mtimeMs > ttlMs) {
+      if (now - draftLastTouchedMs(dir) > ttlMs) {
         rmSync(dir, { recursive: true, force: true });
         removed += 1;
       }
