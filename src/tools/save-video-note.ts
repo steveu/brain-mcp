@@ -5,7 +5,6 @@ import { resolveUnderVault } from "../vault-fs.js";
 import type { WriteDeps, WriteTool } from "./types.js";
 
 export type KeyPoint = { text: string; seconds: number };
-export type VideoLink = { entity: string; target: string };
 
 export type SaveVideoNoteArgs = {
   url: string;
@@ -14,7 +13,6 @@ export type SaveVideoNoteArgs = {
   durationHuman: string;
   gist: string;
   key_points: KeyPoint[];
-  links?: VideoLink[];
   takeaways?: string;
 };
 
@@ -83,19 +81,8 @@ export function buildDeepLink(videoId: string, seconds: number): string {
   return `[[${secondsToTimestamp(seconds)}]](https://youtu.be/${videoId}?t=${seconds})`;
 }
 
-export function getLondonDate(now: Date = new Date()): string {
-  const parts = new Intl.DateTimeFormat("en-GB", {
-    timeZone: "Europe/London",
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(now);
-  const p: Partial<Record<string, string>> = {};
-  for (const part of parts) p[part.type] = part.value;
-  const year = p["year"] ?? "";
-  const month = p["month"] ?? "";
-  const day = p["day"] ?? "";
-  return `${year}-${month}-${day}`;
+export function getLondonDate(): string {
+  return new Date().toLocaleDateString("en-CA", { timeZone: "Europe/London" });
 }
 
 export function buildNote(args: SaveVideoNoteArgs, videoId: string): string {
@@ -139,28 +126,19 @@ export function buildNote(args: SaveVideoNoteArgs, videoId: string): string {
   return lines.join("\n");
 }
 
-// Normalise a URL for dedupe comparison: strip fragment and trailing slashes.
-function normaliseUrl(u: string): string {
-  return u.replace(/#.*$/, "").replace(/\/+$/, "").trim();
-}
-
-// Scan Sources/*.md frontmatter for a matching `source:` URL.
-// Returns the vault-relative path of the matching note, or null.
+// Scan Sources/*.md frontmatter for a note whose `source:` URL resolves to
+// the same YouTube video ID as `url`. ID-based comparison means short links,
+// long links, and URLs with extra query params (e.g. &t=42) all match.
 export function findExistingNote(sourcesDir: string, url: string): string | null {
   if (!existsSync(sourcesDir)) return null;
+  const incomingId = extractYouTubeId(url);
+  if (!incomingId) return null;
   let files: string[];
   try {
     files = readdirSync(sourcesDir).filter((f) => f.endsWith(".md"));
   } catch {
     return null;
   }
-  const normUrl = normaliseUrl(url);
-  // Also normalise the canonical form of the URL (watch?v=...).
-  const id = extractYouTubeId(url);
-  const canonicalNorm = id
-    ? normaliseUrl(`https://www.youtube.com/watch?v=${id}`)
-    : null;
-
   for (const file of files) {
     const filePath = path.join(sourcesDir, file);
     let content: string;
@@ -174,11 +152,8 @@ export function findExistingNote(sourcesDir: string, url: string): string | null
     if (!fmMatch?.[1]) continue;
     const sourceMatch = fmMatch[1].match(/^source:\s*(.+)$/m);
     if (!sourceMatch?.[1]) continue;
-    const existingNorm = normaliseUrl(sourceMatch[1].trim());
-    if (
-      existingNorm === normUrl ||
-      (canonicalNorm !== null && existingNorm === canonicalNorm)
-    ) {
+    const storedId = extractYouTubeId(sourceMatch[1].trim());
+    if (storedId && storedId === incomingId) {
       return path.join("Sources", file);
     }
   }
@@ -256,19 +231,6 @@ export const saveVideoNoteTool: WriteTool<SaveVideoNoteArgs> = {
       .min(1)
       .describe(
         "Timestamped key points. Each is rendered as a bullet with a [[mm:ss]] deep-link.",
-      ),
-    links: z
-      .array(
-        z.object({
-          entity: z.string().min(1).describe("Entity name as it appears in the note text."),
-          target: z.string().min(1).describe("Wikilink target (existing vault note title)."),
-        }),
-      )
-      .optional()
-      .describe(
-        "Forward-only wikilinks proposed for this note. " +
-          "The caller is expected to embed [[wikilinks]] in key_points text; " +
-          "this array is a manifest of those links.",
       ),
     takeaways: z
       .string()

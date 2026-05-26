@@ -280,6 +280,34 @@ describe("findExistingNote", () => {
     expect(result).toBe(path.join("Sources", "Existing Video.md"));
   });
 
+  it("matches when stored source has extra query params (e.g. &t=42)", () => {
+    const sourcesDir = path.join(dir, "Sources");
+    mkdirSync(sourcesDir);
+    writeFileSync(
+      path.join(sourcesDir, "Existing Video.md"),
+      "---\nsource: https://www.youtube.com/watch?v=dQw4w9WgXcQ&t=42\nchannel: Rick Astley\ncaptured: 2025-01-01\n---\n\nGist.\n",
+    );
+    const result = findExistingNote(
+      sourcesDir,
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    );
+    expect(result).toBe(path.join("Sources", "Existing Video.md"));
+  });
+
+  it("matches when stored source is a short youtu.be link", () => {
+    const sourcesDir = path.join(dir, "Sources");
+    mkdirSync(sourcesDir);
+    writeFileSync(
+      path.join(sourcesDir, "Existing Video.md"),
+      "---\nsource: https://youtu.be/dQw4w9WgXcQ\nchannel: Rick Astley\ncaptured: 2025-01-01\n---\n\nGist.\n",
+    );
+    const result = findExistingNote(
+      sourcesDir,
+      "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+    );
+    expect(result).toBe(path.join("Sources", "Existing Video.md"));
+  });
+
   it("ignores files without a frontmatter source: key", () => {
     const sourcesDir = path.join(dir, "Sources");
     mkdirSync(sourcesDir);
