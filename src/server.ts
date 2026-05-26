@@ -291,6 +291,17 @@ function summariseToolArgs(toolName: string, args: unknown): Record<string, unkn
       filename: typeof a?.filename === "string" ? a.filename : undefined,
     };
   }
+  if (toolName === "save_video_note") {
+    const a = args as Record<string, unknown>;
+    const kp = Array.isArray(a?.key_points) ? a.key_points : [];
+    return {
+      url: typeof a?.url === "string" ? a.url : undefined,
+      title: typeof a?.title === "string" ? a.title : undefined,
+      key_points_count: kp.length,
+      gist_length: typeof a?.gist === "string" ? a.gist.length : 0,
+      has_takeaways: typeof a?.takeaways === "string" && a.takeaways.length > 0,
+    };
+  }
   // Read tools — surface only top-level argument keys, never values.
   if (args && typeof args === "object") {
     return { keys: Object.keys(args as Record<string, unknown>) };
