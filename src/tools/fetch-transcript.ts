@@ -4,7 +4,10 @@ import { z } from "zod";
 import type { WriteTool } from "./types.js";
 
 const execFileAsync = promisify(execFile);
+// yt-dlp's single-video JSON can include large caption manifest payloads across
+// languages/formats, so keep a generous cap rather than walk-route's smaller one.
 const MAX_BUFFER = 64 * 1024 * 1024;
+const CAPTION_FETCH_TIMEOUT_MS = 30_000;
 const LANGS = ["en", "en-GB", "en-US", "en-orig"] as const;
 
 export type CaptionKind = "manual" | "auto";
@@ -126,11 +129,12 @@ export function pickTrack(json: unknown): CaptionTrack | null {
 function metaFrom(json: unknown, fallbackUrl: string): TranscriptMeta {
   const j = json as Record<string, unknown>;
   const duration = Number(j.duration ?? 0);
+  const channelUrl = j.uploader_url ?? j.channel_url;
   return {
     id: String(j.id ?? ""),
     title: String(j.title ?? ""),
     channel: String(j.uploader ?? j.channel ?? ""),
-    channelUrl: typeof (j.uploader_url ?? j.channel_url) === "string" ? (j.uploader_url ?? j.channel_url) as string : null,
+    channelUrl: typeof channelUrl === "string" ? channelUrl : null,
     duration,
     durationHuman: humanDuration(duration),
     uploadDate: typeof j.upload_date === "string" ? j.upload_date : null,
@@ -233,7 +237,7 @@ export async function runFetchTranscript(
 }
 
 async function fetchJson(url: string): Promise<unknown> {
-  const resp = await fetch(url);
+  const resp = await fetch(url, { signal: AbortSignal.timeout(CAPTION_FETCH_TIMEOUT_MS) });
   if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
   return resp.json();
 }
@@ -247,6 +251,8 @@ function defaultDeps(): FetchTranscriptDeps {
   };
 }
 
+const DEFAULT_DEPS = defaultDeps();
+
 export const fetchTranscriptTool: WriteTool<FetchTranscriptArgs> = {
   name: "fetch_transcript",
   title: "Fetch a YouTube transcript",
@@ -257,5 +263,5 @@ export const fetchTranscriptTool: WriteTool<FetchTranscriptArgs> = {
   inputSchema: {
     url: z.string().url().describe("YouTube video URL."),
   },
-  run: async (_deps, args) => JSON.stringify(await runFetchTranscript(defaultDeps(), args)),
+  run: async (_deps, args) => JSON.stringify(await runFetchTranscript(DEFAULT_DEPS, args)),
 };

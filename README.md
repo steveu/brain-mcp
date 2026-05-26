@@ -41,6 +41,11 @@ the service in reach of Claude.ai's custom-connector flow.
 - `save_route(id: string, filename?: string)` — copy a draft built by
   `walk_route` into `vault/Travel/<filename>.gpx`, the gate before a route is
   final. Returns the vault path; refuses an unknown id.
+- `fetch_transcript(url: string)` — fetch YouTube metadata plus an inline
+  timestamped English transcript, preferring manual captions over auto-captions.
+  Returns JSON with `status: "ok" | "no-transcript" | "error"`. Requires a
+  `yt-dlp` install with bgutil/PoT support; override the binary with
+  `YTDLP_BIN` and the Node runtime passed to yt-dlp with `NODE_BIN` if needed.
 
 ### Read (allowlist-scoped)
 

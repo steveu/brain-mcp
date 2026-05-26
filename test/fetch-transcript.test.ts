@@ -210,6 +210,19 @@ describe("runFetchTranscript", () => {
     expect(result).toEqual({ status: "error", reason: "yt-dlp returned output that was not valid JSON." });
   });
 
+  it("returns an error for live broadcasts in progress", async () => {
+    const result = await runFetchTranscript(
+      deps({
+        exec: async () => ({ stdout: JSON.stringify({ ...META, live_status: "is_live" }), stderr: "" }),
+      }),
+      { url: "https://youtu.be/abc123def45" },
+    );
+    expect(result).toEqual({
+      status: "error",
+      reason: "The video is a live broadcast in progress — try again once the stream ends.",
+    });
+  });
+
   it("returns mapped errors from failed yt-dlp runs", async () => {
     const result = await runFetchTranscript(
       deps({
